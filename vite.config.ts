@@ -7,7 +7,12 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['apple-touch-icon.png', 'favicon.svg'],
+      includeAssets: [
+        'favicon.svg',
+        'apple-touch-icon.png',
+        'apple-touch-icon-152.png',
+        'apple-touch-icon-167.png',
+      ],
       manifest: {
         name: 'Minah — Baby Tracker',
         short_name: 'Minah',

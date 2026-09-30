@@ -1,5 +1,7 @@
 # Minah — baby tracker for iPhone
 
+**Live: [minah-baby.netlify.app](https://minah-baby.netlify.app)**
+
 A one-thumb daily log for a baby's feeds, sleep and diapers, shared live between
 the people looking after them.
 
@@ -59,17 +61,27 @@ Anything you logged before creating the shared space moves across with you.
 
 ## Put it on an iPhone Home Screen
 
-The app has to be served over HTTPS for the Home Screen install to work, so
-deploy it first (Vercel, Netlify, Cloudflare Pages — all free for this). Set the
-same two `VITE_SUPABASE_*` values as environment variables in the host, then:
+On the iPhone, open [minah-baby.netlify.app](https://minah-baby.netlify.app) in
+**Safari** — it has to be Safari, not Chrome — then tap the Share button and
+choose **Add to Home Screen**. It then opens full screen with its own icon, no
+address bar, and keeps working with no signal.
+
+## Deploying changes
+
+The site is hosted on Netlify and the folder is already linked to it:
 
 ```bash
-npm run build     # outputs dist/
+npm run build
+netlify deploy --prod --dir dist
 ```
 
-On the iPhone, open the deployed URL in **Safari**, tap the Share button, then
-**Add to Home Screen**. It then opens full screen with its own icon and works
-offline.
+If you add the Supabase keys, set them on the host too so the built site can
+reach them, then redeploy:
+
+```bash
+netlify env:set VITE_SUPABASE_URL "https://your-project-ref.supabase.co"
+netlify env:set VITE_SUPABASE_ANON_KEY "your-anon-public-key"
+```
 
 ## Notes on the implementation
 
