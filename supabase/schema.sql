@@ -194,6 +194,9 @@ do $$
 begin
   alter publication supabase_realtime add table public.events;
 exception
+  -- Already added (re-running this file), or the publication is missing on a
+  -- self-hosted setup. Neither should stop the rest of the schema.
   when duplicate_object then null;
+  when undefined_object then null;
 end;
 $$;
