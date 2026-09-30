@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { CheckIcon, CopyIcon, UsersIcon } from './Icons';
 import { useStore } from '../lib/store';
 
+const JOIN_CODE_LENGTH = 8;
+
 const SYNC_COPY = {
   synced: 'Saved for both of you',
   syncing: 'Saving…',
@@ -183,18 +185,21 @@ export function FamilyView() {
               <input
                 type="text"
                 value={code}
-                placeholder="Enter code"
+                placeholder={`${JOIN_CODE_LENGTH}-character code`}
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                maxLength={8}
-                onChange={(event) => setCode(event.target.value.toUpperCase())}
+                maxLength={JOIN_CODE_LENGTH}
+                // Tolerate a code pasted with spaces around or inside it.
+                onChange={(event) =>
+                  setCode(event.target.value.toUpperCase().replace(/\s/g, ''))
+                }
                 aria-label="Join code"
               />
               <button
                 type="button"
                 className="button-primary compact"
-                disabled={busy || code.trim().length < 6}
+                disabled={busy || code.length < JOIN_CODE_LENGTH}
                 onClick={() => void joinHousehold(code)}
               >
                 Join
