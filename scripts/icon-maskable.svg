@@ -1,0 +1,21 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="minah-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c0b0ff" />
+      <stop offset="1" stop-color="#7a5fef" />
+    </linearGradient>
+  </defs>
+  <!-- Full-bleed square so the OS can crop to any shape; art stays inside the safe circle. -->
+  <rect width="512" height="512" fill="url(#minah-bg)" />
+  <g transform="translate(256 256) scale(0.72) translate(-256 -256)">
+    <g fill="#ffffff">
+      <rect x="228" y="84" width="56" height="56" rx="26" />
+      <rect x="202" y="138" width="108" height="30" rx="12" />
+      <path d="M216 168H296V190C296 206 303 220 315 230L322 236C338 250 347 270 347 291V382C347 408 326 430 300 430H212C186 430 165 408 165 382V291C165 270 174 250 190 236L197 230C209 220 216 206 216 190Z" />
+    </g>
+    <g stroke="#7a5fef" stroke-width="15" stroke-linecap="round" opacity="0.45">
+      <path d="M196 302H248" />
+      <path d="M196 348H248" />
+    </g>
+  </g>
+</svg>
