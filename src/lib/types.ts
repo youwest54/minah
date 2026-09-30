@@ -33,10 +33,9 @@ export interface BabyEvent {
 
 export interface Household {
   id: string;
-  name: string;
   babyName: string;
   joinCode: string | null;
-  /** False for the on-device-only household used before Supabase is set up. */
+  /** False for the on-device-only household used before a family is created. */
   cloud: boolean;
 }
 

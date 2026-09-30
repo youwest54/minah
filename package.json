@@ -7,9 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "icons": "node scripts/generate-icons.mjs"
+    "icons": "node scripts/generate-icons.mjs",
+    "test:api": "node scripts/test-api.mjs"
   },
   "devDependencies": {
+    "@netlify/functions": "^6.0.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react-swc": "^4.3.3",
@@ -18,7 +20,7 @@
     "vite": "^8.3.0"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
+    "@netlify/blobs": "^11.1.2",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "vite-plugin-pwa": "^1.3.0"

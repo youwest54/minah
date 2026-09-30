@@ -3,10 +3,10 @@ import { CheckIcon, CopyIcon, UsersIcon } from './Icons';
 import { useStore } from '../lib/store';
 
 const SYNC_COPY = {
-  synced: 'All changes saved',
+  synced: 'Saved for both of you',
   syncing: 'Saving…',
-  offline: 'Offline — saved on this phone, will sync later',
-  'local-only': 'Saved on this phone only',
+  offline: 'Offline — saved here, will sync later',
+  'local-only': 'This phone only',
 } as const;
 
 function isStandalone(): boolean {
@@ -20,7 +20,7 @@ export function FamilyView() {
     household,
     sync,
     pendingCount,
-    cloudConfigured,
+    busy,
     error,
     clearError,
     setBabyName,
@@ -32,16 +32,19 @@ export function FamilyView() {
   const [nameDraft, setNameDraft] = useState(household.babyName);
   const [code, setCode] = useState('');
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [confirmLeave, setConfirmLeave] = useState(false);
   const [showInstall, setShowInstall] = useState(false);
 
   useEffect(() => setNameDraft(household.babyName), [household.babyName]);
   useEffect(() => setShowInstall(!isStandalone()), []);
 
-  async function copyCode() {
-    if (!household.joinCode) return;
+  const joinLink = household.joinCode
+    ? `${window.location.origin}/#join=${household.joinCode}`
+    : '';
+
+  async function copyLink() {
     try {
-      await navigator.clipboard.writeText(household.joinCode);
+      await navigator.clipboard.writeText(joinLink);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -49,24 +52,17 @@ export function FamilyView() {
     }
   }
 
-  async function shareCode() {
-    if (!household.joinCode) return;
-    const text = `Join me on Minah to track ${household.babyName}. Our code is ${household.joinCode}`;
+  async function shareLink() {
+    const text = `Open this to follow ${household.babyName} with me on Minah`;
     if (navigator.share) {
       try {
-        await navigator.share({ title: 'Minah', text });
+        await navigator.share({ title: 'Minah', text, url: joinLink });
+        return;
       } catch {
-        // User dismissed the share sheet.
+        // Share sheet dismissed; fall through to copying.
       }
-    } else {
-      await copyCode();
     }
-  }
-
-  async function run(task: () => Promise<void>) {
-    setBusy(true);
-    await task();
-    setBusy(false);
+    await copyLink();
   }
 
   return (
@@ -109,50 +105,89 @@ export function FamilyView() {
         {household.cloud ? (
           <>
             <p className="panel-copy">
-              Anyone who enters this code sees the same entries as you, live.
+              Send this link to your wife. When she opens it on her iPhone she joins
+              automatically and you both see the same history.
+            </p>
+
+            <button type="button" className="button-primary" onClick={shareLink}>
+              <UsersIcon width={18} height={18} />
+              Share the link
+            </button>
+
+            <button type="button" className="button-ghost" onClick={copyLink}>
+              {copied ? <CheckIcon width={18} height={18} /> : <CopyIcon width={18} height={18} />}
+              {copied ? 'Link copied' : 'Copy the link'}
+            </button>
+
+            <p className="panel-copy">
+              Or she can type this code in the box on her Family page:
             </p>
             <div className="code-display">
               <strong>{household.joinCode}</strong>
-              <button type="button" className="icon-button" onClick={copyCode} aria-label="Copy code">
-                {copied ? <CheckIcon width={20} height={20} /> : <CopyIcon width={20} height={20} />}
-              </button>
             </div>
-            <button type="button" className="button-primary" onClick={shareCode}>
-              <UsersIcon width={18} height={18} />
-              Share this code
-            </button>
-            <button
-              type="button"
-              className="button-ghost"
-              disabled={busy}
-              onClick={() => void run(leaveHousehold)}
-            >
-              Stop sharing on this phone
-            </button>
+
+            {confirmLeave ? (
+              <div className="confirm-row">
+                <p>Stop following this family on this phone? The history stays on the server.</p>
+                <div className="confirm-actions">
+                  <button
+                    type="button"
+                    className="button-ghost"
+                    onClick={() => setConfirmLeave(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="button-danger"
+                    onClick={() => {
+                      leaveHousehold();
+                      setConfirmLeave(false);
+                    }}
+                  >
+                    Stop
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="button-ghost"
+                onClick={() => setConfirmLeave(true)}
+              >
+                Stop sharing on this phone
+              </button>
+            )}
           </>
-        ) : cloudConfigured ? (
+        ) : (
           <>
             <p className="panel-copy">
-              Create a shared space to log together with your partner, or enter the code they
-              already have. Everything on this phone comes with you.
+              Right now entries are only on this phone. Start a family to keep the history on
+              the server and share it — everything you already logged comes with you.
             </p>
             <button
               type="button"
               className="button-primary"
               disabled={busy}
-              onClick={() => void run(() => createHousehold(household.babyName))}
+              onClick={() => void createHousehold(household.babyName)}
             >
-              Create a shared space
+              <UsersIcon width={18} height={18} />
+              {busy ? 'Setting up…' : 'Start our family'}
             </button>
+
+            <div className="when-divider">
+              <span>or join one that already exists</span>
+            </div>
+
             <div className="inline-form">
               <input
                 type="text"
                 value={code}
-                placeholder="6-character code"
+                placeholder="Enter code"
                 autoCapitalize="characters"
                 autoCorrect="off"
                 spellCheck={false}
-                maxLength={6}
+                maxLength={8}
                 onChange={(event) => setCode(event.target.value.toUpperCase())}
                 aria-label="Join code"
               />
@@ -160,21 +195,16 @@ export function FamilyView() {
                 type="button"
                 className="button-primary compact"
                 disabled={busy || code.trim().length < 6}
-                onClick={() => void run(() => joinHousehold(code))}
+                onClick={() => void joinHousehold(code)}
               >
                 Join
               </button>
             </div>
           </>
-        ) : (
-          <p className="panel-copy">
-            Sharing needs Supabase keys in <code>.env.local</code>. Until then everything is saved
-            safely on this phone.
-          </p>
         )}
 
         {error ? (
-          <p className="sheet-problem" onClick={clearError} role="alert">
+          <p className="sheet-problem" role="alert" onClick={clearError}>
             {error}
           </p>
         ) : null}

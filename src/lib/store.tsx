@@ -8,68 +8,16 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { cloudConfigured, ensureSignedIn, supabase } from './supabase';
+import * as api from './api';
+import { ApiError } from './api';
 import * as storage from './storage';
 import { LOCAL_HOUSEHOLD } from './storage';
 import { nowIso } from './time';
 import type { BabyEvent, EventDetails, EventType, Household, SyncState } from './types';
 
-interface EventRow {
-  id: string;
-  household_id: string;
-  type: EventType;
-  started_at: string;
-  ended_at: string | null;
-  details: EventDetails | null;
-  created_by: string | null;
-  updated_at: string;
-  deleted: boolean;
-}
-
-interface HouseholdRow {
-  id: string;
-  name: string;
-  baby_name: string;
-  join_code: string;
-}
-
-function fromRow(row: EventRow): BabyEvent {
-  return {
-    id: row.id,
-    householdId: row.household_id,
-    type: row.type,
-    startedAt: row.started_at,
-    endedAt: row.ended_at,
-    details: row.details ?? {},
-    createdBy: row.created_by,
-    updatedAt: row.updated_at,
-    deleted: row.deleted,
-  };
-}
-
-function toRow(event: BabyEvent): EventRow {
-  return {
-    id: event.id,
-    household_id: event.householdId,
-    type: event.type,
-    started_at: event.startedAt,
-    ended_at: event.endedAt,
-    details: event.details,
-    created_by: event.createdBy,
-    updated_at: event.updatedAt,
-    deleted: event.deleted,
-  };
-}
-
-function fromHouseholdRow(row: HouseholdRow): Household {
-  return {
-    id: row.id,
-    name: row.name,
-    babyName: row.baby_name,
-    joinCode: row.join_code,
-    cloud: true,
-  };
-}
+/** How often to look for the other phone's entries while the app is open. */
+const POLL_INTERVAL_MS = 15_000;
+const PUSH_DEBOUNCE_MS = 400;
 
 /** Last write wins, compared on `updatedAt`, newest activity first. */
 function mergeEvents(current: BabyEvent[], incoming: BabyEvent[]): BabyEvent[] {
@@ -80,6 +28,16 @@ function mergeEvents(current: BabyEvent[], incoming: BabyEvent[]): BabyEvent[] {
     if (!existing || event.updatedAt > existing.updatedAt) byId.set(event.id, event);
   }
   return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+function friendlyError(cause: unknown): string {
+  if (cause instanceof ApiError) {
+    if (cause.code === 'INVALID_CODE') {
+      return 'That code did not match any family. Check the letters and try again.';
+    }
+    if (cause.code === 'NOT_FOUND') return 'That family no longer exists.';
+  }
+  return 'Could not reach the server. Check your connection and try again.';
 }
 
 export interface NewEventInput {
@@ -101,7 +59,7 @@ interface StoreValue {
   activeSleep: BabyEvent | null;
   sync: SyncState;
   pendingCount: number;
-  cloudConfigured: boolean;
+  busy: boolean;
   error: string | null;
   clearError: () => void;
   addEvent: (input: NewEventInput) => BabyEvent;
@@ -110,28 +68,50 @@ interface StoreValue {
   setBabyName: (name: string) => void;
   createHousehold: (babyName: string) => Promise<void>;
   joinHousehold: (code: string) => Promise<void>;
-  leaveHousehold: () => Promise<void>;
+  leaveHousehold: () => void;
+  refresh: () => void;
 }
 
 const StoreContext = createContext<StoreValue | null>(null);
+
+/** A stable per-phone id, so entries can record which device logged them. */
+function deviceId(): string {
+  const key = 'minah.v1.device';
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(key, id);
+  }
+  return id;
+}
+
+/** Supports links like https://…/#join=ABCD2345 shared with a partner. */
+function joinCodeFromUrl(): string | null {
+  const source = `${window.location.hash} ${window.location.search}`;
+  const match = /join=([A-Za-z0-9]{6,12})/.exec(source);
+  return match ? match[1].toUpperCase() : null;
+}
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [household, setHouseholdState] = useState<Household>(() => storage.loadHousehold());
   const [events, setEvents] = useState<BabyEvent[]>(() =>
     storage.loadEvents(storage.loadHousehold().id),
   );
-  const [sync, setSync] = useState<SyncState>(cloudConfigured ? 'syncing' : 'local-only');
+  const [sync, setSync] = useState<SyncState>(() =>
+    storage.loadHousehold().cloud ? 'syncing' : 'local-only',
+  );
   const [pendingCount, setPendingCount] = useState(0);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const eventsRef = useRef<BabyEvent[]>(events);
   const outboxRef = useRef<Set<string>>(new Set());
-  const userIdRef = useRef<string | null>(null);
   const householdIdRef = useRef(household.id);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deepLinkHandledRef = useRef(false);
 
   householdIdRef.current = household.id;
-  const isCloud = household.cloud && supabase !== null;
+  const isCloud = household.cloud;
 
   const commitEvents = useCallback((next: BabyEvent[]) => {
     eventsRef.current = next;
@@ -145,58 +125,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPendingCount(ids.length);
   }, []);
 
-  const push = useCallback(async () => {
-    const client = supabase;
+  const setHousehold = useCallback((next: Household) => {
+    storage.saveHousehold(next);
+    setHouseholdState(next);
+  }, []);
+
+  /**
+   * One round trip does both directions: unsent entries go up and the server
+   * answers with the household's whole history, which includes anything the
+   * other phone added.
+   */
+  const syncNow = useCallback(async () => {
     const householdId = householdIdRef.current;
-    if (!client || householdId === LOCAL_HOUSEHOLD.id) return;
+    if (householdId === LOCAL_HOUSEHOLD.id) return;
 
-    const ids = [...outboxRef.current];
-    if (ids.length === 0) return;
-
-    const rows = ids
+    const pending = [...outboxRef.current]
       .map((id) => eventsRef.current.find((event) => event.id === id))
-      .filter((event): event is BabyEvent => event !== undefined)
-      .map(toRow);
-    if (rows.length === 0) return;
+      .filter((event): event is BabyEvent => event !== undefined);
 
     setSync('syncing');
-    const { error: upsertError } = await client.from('events').upsert(rows);
-    if (upsertError) {
+    try {
+      const serverEvents =
+        pending.length > 0
+          ? await api.pushEvents(householdId, pending)
+          : await api.fetchEvents(householdId);
+
+      // Only clear what was actually sent; anything logged mid-request stays queued.
+      for (const event of pending) outboxRef.current.delete(event.id);
+      persistOutbox();
+
+      commitEvents(mergeEvents(eventsRef.current, serverEvents));
+      setSync(outboxRef.current.size > 0 ? 'syncing' : 'synced');
+    } catch {
       setSync('offline');
-      return;
     }
-    for (const id of ids) outboxRef.current.delete(id);
-    persistOutbox();
-    setSync('synced');
-  }, [persistOutbox]);
+  }, [commitEvents, persistOutbox]);
 
   const schedulePush = useCallback(() => {
     if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    pushTimerRef.current = setTimeout(() => {
-      void push();
-    }, 250);
-  }, [push]);
-
-  const pull = useCallback(async () => {
-    const client = supabase;
-    const householdId = householdIdRef.current;
-    if (!client || householdId === LOCAL_HOUSEHOLD.id) return;
-
-    setSync('syncing');
-    const { data, error: selectError } = await client
-      .from('events')
-      .select('*')
-      .eq('household_id', householdId)
-      .order('started_at', { ascending: false })
-      .limit(1000);
-
-    if (selectError) {
-      setSync('offline');
-      return;
-    }
-    commitEvents(mergeEvents(eventsRef.current, (data as EventRow[]).map(fromRow)));
-    setSync(outboxRef.current.size > 0 ? 'syncing' : 'synced');
-  }, [commitEvents]);
+    pushTimerRef.current = setTimeout(() => void syncNow(), PUSH_DEBOUNCE_MS);
+  }, [syncNow]);
 
   // Swap the local cache whenever the active household changes.
   useEffect(() => {
@@ -207,71 +175,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setPendingCount(outboxRef.current.size);
   }, [household.id]);
 
-  // Sign in, backfill from the server, and listen for the other parent's taps.
+  // Keep in step with the server while the app is open.
   useEffect(() => {
     if (!isCloud) {
-      setSync(cloudConfigured ? 'synced' : 'local-only');
+      setSync('local-only');
       return;
     }
-    const client = supabase;
-    if (!client) return;
 
-    let cancelled = false;
+    void syncNow();
 
-    void (async () => {
-      try {
-        userIdRef.current = await ensureSignedIn(client);
-      } catch {
-        if (!cancelled) setSync('offline');
-        return;
-      }
-      if (cancelled) return;
-      await push();
-      if (!cancelled) await pull();
-    })();
-
-    const channel = client
-      .channel(`events-${household.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'events',
-          filter: `household_id=eq.${household.id}`,
-        },
-        (payload) => {
-          const row = payload.new as EventRow | null;
-          if (!row?.id) return;
-          commitEvents(mergeEvents(eventsRef.current, [fromRow(row)]));
-        },
-      )
-      .subscribe();
-
-    const resync = () => {
-      void push().then(pull);
-    };
     const onVisible = () => {
-      if (document.visibilityState === 'visible') resync();
+      if (document.visibilityState === 'visible') void syncNow();
     };
+    const onOnline = () => void syncNow();
 
-    window.addEventListener('online', resync);
     document.addEventListener('visibilitychange', onVisible);
-    const interval = setInterval(resync, 60_000);
+    window.addEventListener('online', onOnline);
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') void syncNow();
+    }, POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
-      window.removeEventListener('online', resync);
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', onOnline);
       clearInterval(interval);
-      void client.removeChannel(channel);
     };
-  }, [isCloud, household.id, push, pull, commitEvents]);
+  }, [isCloud, household.id, syncNow]);
 
   const upsertLocal = useCallback(
     (event: BabyEvent) => {
       commitEvents(mergeEvents(eventsRef.current, [event]));
-      // With no server to push to there is nothing to queue.
       if (householdIdRef.current === LOCAL_HOUSEHOLD.id) return;
       outboxRef.current.add(event.id);
       persistOutbox();
@@ -289,7 +222,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         startedAt: input.startedAt.toISOString(),
         endedAt: input.endedAt ? input.endedAt.toISOString() : null,
         details: input.details ?? {},
-        createdBy: userIdRef.current,
+        createdBy: deviceId(),
         updatedAt: nowIso(),
         deleted: false,
       };
@@ -328,18 +261,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [upsertLocal],
   );
 
-  const setHousehold = useCallback((next: Household) => {
-    storage.saveHousehold(next);
-    setHouseholdState(next);
-  }, []);
-
   const setBabyName = useCallback(
     (name: string) => {
       const trimmed = name.trim() || 'Baby';
-      const next = { ...household, babyName: trimmed };
-      setHousehold(next);
-      if (household.cloud && supabase) {
-        void supabase.from('households').update({ baby_name: trimmed }).eq('id', household.id);
+      setHousehold({ ...household, babyName: trimmed });
+      if (household.cloud) {
+        void api.renameBaby(household.id, trimmed).catch(() => {
+          // The name is already saved on this phone; the next edit retries.
+        });
       }
     },
     [household, setHousehold],
@@ -347,30 +276,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const createHousehold = useCallback(
     async (babyName: string) => {
-      const client = supabase;
-      if (!client) {
-        setError('Cloud sharing is not configured yet.');
-        return;
-      }
       setError(null);
+      setBusy(true);
       try {
-        await ensureSignedIn(client).then((id) => {
-          userIdRef.current = id;
-        });
-        const { data, error: rpcError } = await client.rpc('create_household', {
-          p_baby_name: babyName.trim() || 'Baby',
-        });
-        if (rpcError) throw rpcError;
+        const next = await api.createHousehold(babyName);
 
-        const next = fromHouseholdRow(data as HouseholdRow);
-
-        // Carry anything already logged on this phone into the shared household.
+        // Carry anything already logged on this phone into the shared family.
         const existing = storage.loadEvents(householdIdRef.current).filter((e) => !e.deleted);
         if (existing.length > 0) {
           const moved = existing.map((event) => ({
             ...event,
             householdId: next.id,
-            createdBy: userIdRef.current,
             updatedAt: nowIso(),
           }));
           storage.saveEvents(next.id, moved);
@@ -381,7 +297,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         setHousehold(next);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Could not create the shared space.');
+        setError(friendlyError(cause));
+      } finally {
+        setBusy(false);
       }
     },
     [setHousehold],
@@ -389,38 +307,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const joinHousehold = useCallback(
     async (code: string) => {
-      const client = supabase;
-      if (!client) {
-        setError('Cloud sharing is not configured yet.');
-        return;
-      }
       setError(null);
+      setBusy(true);
       try {
-        await ensureSignedIn(client).then((id) => {
-          userIdRef.current = id;
-        });
-        const { data, error: rpcError } = await client.rpc('join_household', {
-          p_code: code.trim().toUpperCase(),
-        });
-        if (rpcError) throw rpcError;
-        if (!data) throw new Error('That code did not match any family.');
-        setHousehold(fromHouseholdRow(data as HouseholdRow));
+        setHousehold(await api.joinHousehold(code));
       } catch (cause) {
-        const message =
-          cause instanceof Error && cause.message.includes('INVALID_CODE')
-            ? 'That code did not match any family. Check the 6 characters and try again.'
-            : cause instanceof Error
-              ? cause.message
-              : 'Could not join.';
-        setError(message);
+        setError(friendlyError(cause));
+      } finally {
+        setBusy(false);
       }
     },
     [setHousehold],
   );
 
-  const leaveHousehold = useCallback(async () => {
+  const leaveHousehold = useCallback(() => {
     setHousehold({ ...LOCAL_HOUSEHOLD, babyName: household.babyName });
   }, [household.babyName, setHousehold]);
+
+  // A shared link joins the family straight away, with no code to type.
+  useEffect(() => {
+    if (deepLinkHandledRef.current) return;
+    const code = joinCodeFromUrl();
+    if (!code) return;
+
+    deepLinkHandledRef.current = true;
+    window.history.replaceState(null, '', window.location.pathname);
+    if (code === household.joinCode) return;
+    void joinHousehold(code);
+  }, [household.joinCode, joinHousehold]);
 
   const visibleEvents = useMemo(() => events.filter((event) => !event.deleted), [events]);
 
@@ -436,7 +350,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeSleep,
       sync,
       pendingCount,
-      cloudConfigured,
+      busy,
       error,
       clearError: () => setError(null),
       addEvent,
@@ -446,6 +360,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       createHousehold,
       joinHousehold,
       leaveHousehold,
+      refresh: () => void syncNow(),
     }),
     [
       household,
@@ -453,6 +368,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeSleep,
       sync,
       pendingCount,
+      busy,
       error,
       addEvent,
       updateEvent,
@@ -461,6 +377,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       createHousehold,
       joinHousehold,
       leaveHousehold,
+      syncNow,
     ],
   );
 

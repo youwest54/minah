@@ -6,7 +6,6 @@ const outboxKey = (householdId: string) => `minah.v1.outbox.${householdId}`;
 
 export const LOCAL_HOUSEHOLD: Household = {
   id: 'local',
-  name: 'Home',
   babyName: 'Baby',
   joinCode: null,
   cloud: false,
