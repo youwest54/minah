@@ -1,16 +1,18 @@
 import { useState } from 'react';
 import { TodayView } from './components/TodayView';
+import { OverviewView } from './components/OverviewView';
 import { HistoryView } from './components/HistoryView';
 import { FamilyView } from './components/FamilyView';
 import { EditEventSheet } from './components/EditEventSheet';
-import { HomeIcon, ListIcon, UsersIcon } from './components/Icons';
+import { ChartIcon, HomeIcon, ListIcon, UsersIcon } from './components/Icons';
 import { useStore } from './lib/store';
 import type { BabyEvent } from './lib/types';
 
-type Tab = 'today' | 'history' | 'family';
+type Tab = 'today' | 'overview' | 'history' | 'family';
 
 const TABS: { id: Tab; label: string; Icon: typeof HomeIcon }[] = [
   { id: 'today', label: 'Today', Icon: HomeIcon },
+  { id: 'overview', label: 'Overview', Icon: ChartIcon },
   { id: 'history', label: 'History', Icon: ListIcon },
   { id: 'family', label: 'Family', Icon: UsersIcon },
 ];
@@ -31,6 +33,7 @@ export default function App() {
 
       <main className="app-main">
         {tab === 'today' ? <TodayView onEdit={setEditing} /> : null}
+        {tab === 'overview' ? <OverviewView /> : null}
         {tab === 'history' ? <HistoryView onEdit={setEditing} /> : null}
         {tab === 'family' ? <FamilyView /> : null}
       </main>
@@ -44,7 +47,7 @@ export default function App() {
             aria-current={tab === id ? 'page' : undefined}
             onClick={() => setTab(id)}
           >
-            <Icon width={24} height={24} />
+            <Icon width={22} height={22} />
             <span>{label}</span>
           </button>
         ))}

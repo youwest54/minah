@@ -778,6 +778,151 @@ code {
   background: var(--bg-elev-2);
 }
 
+/* ---------- overview / wake windows ---------- */
+
+.overview-hint {
+  margin: -6px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slot-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.slot-row:last-child {
+  border-bottom: none;
+}
+
+.slot-row span {
+  font-size: 14px;
+  font-weight: 550;
+}
+
+.slot-row strong {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.slot-row em {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.wake-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wake-list--compact {
+  gap: 8px;
+}
+
+.wake-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.wake-row--open {
+  border-color: rgba(255, 209, 102, 0.35);
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.12), rgba(255, 209, 102, 0.04));
+}
+
+.wake-row--gap {
+  border-color: rgba(255, 179, 92, 0.28);
+}
+
+.wake-period {
+  display: flex;
+  gap: 5px;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 52px;
+  padding-top: 2px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--muted);
+  text-align: center;
+}
+
+.wake-period--morning {
+  color: var(--wake);
+}
+
+.wake-period--afternoon {
+  color: var(--sleep);
+}
+
+.wake-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wake-duration {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.wake-duration em {
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 500;
+  color: var(--wake);
+}
+
+.wake-range {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.wake-compare {
+  font-size: 12px;
+  color: #cfc4ff;
+}
+
+.past-days {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.past-day-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+}
+
 /* ---------- toast ---------- */
 
 .toast {

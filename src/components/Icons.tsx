@@ -102,6 +102,18 @@ export function HomeIcon(props: IconProps) {
   );
 }
 
+export function ChartIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 19.5V4.5" />
+      <path d="M4 19.5h16" />
+      <path d="M8 15.5v-4" />
+      <path d="M12.5 15.5V8" />
+      <path d="M17 15.5v-7" />
+    </Icon>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Icon {...props}>
