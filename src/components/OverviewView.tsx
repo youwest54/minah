@@ -72,11 +72,19 @@ function WindowRow({
       <div className="wake-main">
         <strong className="wake-duration">
           {window.open ? formatStopwatch(window.durationMs) : formatDuration(window.durationMs)}
-          {window.open ? <em> awake now</em> : null}
+          {window.open ? <em> awake now</em> : <em> awake</em>}
         </strong>
         <span className="wake-range">
           Woke {formatClock(window.startedAt)}
           {window.endedAt ? ` → slept ${formatClock(window.endedAt)}` : ' → still awake'}
+        </span>
+        <span className="wake-sleep">
+          Slept {formatDuration(window.sleptBeforeMs)} before
+          {window.sleptAfterMs !== null
+            ? window.sleptAfterOpen
+              ? ` · sleeping now ${formatDuration(window.sleptAfterMs)}`
+              : ` · then slept ${formatDuration(window.sleptAfterMs)}`
+            : ''}
         </span>
         {estimate && !longGap ? (
           <span className="wake-estimate">
@@ -422,12 +430,23 @@ export function OverviewView() {
             {formatStopwatch(openWindow.durationMs)}
           </strong>
           <p className="estimate-card-copy">
-            Usually ~{formatDuration(liveEstimate.estimatedMs)} for this wake
+            Slept {formatDuration(openWindow.sleptBeforeMs)} before · usually ~
+            {formatDuration(liveEstimate.estimatedMs)} awake
           </p>
           <p className="estimate-card-next">
             {liveEstimate.overdue
               ? `Past usual time — next sleep was around ${formatClock(liveEstimate.nextSleepAt)}`
               : `Next sleep around ${formatClock(liveEstimate.nextSleepAt)} · ${formatDuration(liveEstimate.remainingMs)} left`}
+          </p>
+        </section>
+      ) : openWindow ? (
+        <section className="estimate-card" aria-live="polite">
+          <p className="estimate-card-label">{slotLabel(openWindow.slot)} · awake now</p>
+          <strong className="estimate-card-timer">
+            {formatStopwatch(openWindow.durationMs)}
+          </strong>
+          <p className="estimate-card-copy">
+            Slept {formatDuration(openWindow.sleptBeforeMs)} before this wake
           </p>
         </section>
       ) : null}

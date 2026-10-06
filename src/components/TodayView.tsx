@@ -172,10 +172,23 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
           <strong className="estimate-card-timer">
             {formatStopwatch(openWindow.durationMs)}
           </strong>
+          <p className="estimate-card-copy">
+            Slept {formatDuration(openWindow.sleptBeforeMs)} before this wake
+          </p>
           <p className="estimate-card-next">
             {liveEstimate.overdue
               ? `Past usual — next sleep was ~${formatClock(liveEstimate.nextSleepAt)}`
               : `Next sleep ~${formatClock(liveEstimate.nextSleepAt)} · ${formatDuration(liveEstimate.remainingMs)} left`}
+          </p>
+        </section>
+      ) : openWindow ? (
+        <section className="estimate-card estimate-card--home" aria-live="polite">
+          <p className="estimate-card-label">{slotLabel(openWindow.slot)} · awake now</p>
+          <strong className="estimate-card-timer">
+            {formatStopwatch(openWindow.durationMs)}
+          </strong>
+          <p className="estimate-card-copy">
+            Slept {formatDuration(openWindow.sleptBeforeMs)} before this wake
           </p>
         </section>
       ) : null}

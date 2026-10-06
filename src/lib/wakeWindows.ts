@@ -26,6 +26,17 @@ export interface WakeWindow {
   endedAt: string | null;
   /** Duration in ms. Uses `now` for open windows. */
   durationMs: number;
+  /** How long the sleep was that ended at this wake. */
+  sleptBeforeMs: number;
+  /** When that preceding sleep started. */
+  sleptBeforeFrom: string;
+  /**
+   * How long the sleep was after this wake (nap she fell into), or null if she
+   * hasn't started that sleep yet / is still awake.
+   */
+  sleptAfterMs: number | null;
+  /** True when the nap after this wake is still in progress. */
+  sleptAfterOpen: boolean;
   /** Local day the window started on, e.g. "2026-10-06". */
   day: string;
   /** 1 = first wake of the day, 2 = second, … */
@@ -67,27 +78,55 @@ function periodOf(iso: string): 'morning' | 'afternoon' {
  * wake, that stretch is an open window ticking up to `now`.
  */
 export function buildWakeWindows(events: BabyEvent[], now: number = Date.now()): WakeWindow[] {
-  const wakes = events
+  const completedSleeps = events
     .filter((event) => event.type === 'sleep' && event.endedAt)
-    .map((event) => event.endedAt as string)
-    .sort((a, b) => a.localeCompare(b));
+    .map((event) => ({
+      startedAt: event.startedAt,
+      endedAt: event.endedAt as string,
+    }))
+    .sort((a, b) => a.endedAt.localeCompare(b.endedAt));
 
-  const sleepStarts = events
+  const allSleeps = events
     .filter((event) => event.type === 'sleep')
-    .map((event) => event.startedAt)
-    .sort((a, b) => a.localeCompare(b));
+    .map((event) => ({
+      startedAt: event.startedAt,
+      endedAt: event.endedAt,
+    }))
+    .sort((a, b) => a.startedAt.localeCompare(b.startedAt));
 
   const windows: WakeWindow[] = [];
-  const latestWake = wakes[wakes.length - 1] ?? null;
+  const latestWake = completedSleeps[completedSleeps.length - 1]?.endedAt ?? null;
 
-  for (const wakeAt of wakes) {
-    const fallAsleepAt = sleepStarts.find((start) => start > wakeAt) ?? null;
+  for (const sleep of completedSleeps) {
+    const wakeAt = sleep.endedAt;
+    const sleptBeforeMs = Math.max(
+      0,
+      new Date(sleep.endedAt).getTime() - new Date(sleep.startedAt).getTime(),
+    );
+    const nextSleep = allSleeps.find((entry) => entry.startedAt > wakeAt) ?? null;
+    const fallAsleepAt = nextSleep?.startedAt ?? null;
+
+    let sleptAfterMs: number | null = null;
+    let sleptAfterOpen = false;
+    if (nextSleep?.endedAt) {
+      sleptAfterMs = Math.max(
+        0,
+        new Date(nextSleep.endedAt).getTime() - new Date(nextSleep.startedAt).getTime(),
+      );
+    } else if (nextSleep && nextSleep.endedAt === null) {
+      sleptAfterMs = Math.max(0, now - new Date(nextSleep.startedAt).getTime());
+      sleptAfterOpen = true;
+    }
 
     if (fallAsleepAt) {
       windows.push({
         startedAt: wakeAt,
         endedAt: fallAsleepAt,
         durationMs: new Date(fallAsleepAt).getTime() - new Date(wakeAt).getTime(),
+        sleptBeforeMs,
+        sleptBeforeFrom: sleep.startedAt,
+        sleptAfterMs,
+        sleptAfterOpen,
         day: dayKey(wakeAt),
         slot: 0,
         period: periodOf(wakeAt),
@@ -96,12 +135,15 @@ export function buildWakeWindows(events: BabyEvent[], now: number = Date.now()):
       continue;
     }
 
-    // Still awake since the most recent wake.
     if (wakeAt === latestWake) {
       windows.push({
         startedAt: wakeAt,
         endedAt: null,
         durationMs: Math.max(0, now - new Date(wakeAt).getTime()),
+        sleptBeforeMs,
+        sleptBeforeFrom: sleep.startedAt,
+        sleptAfterMs: null,
+        sleptAfterOpen: false,
         day: dayKey(wakeAt),
         slot: 0,
         period: periodOf(wakeAt),

@@ -1028,6 +1028,12 @@ code {
   color: #ffdca8;
 }
 
+.wake-sleep {
+  font-size: 13px;
+  line-height: 1.35;
+  color: #cfc4ff;
+}
+
 .slot-list {
   display: flex;
   flex-direction: column;
