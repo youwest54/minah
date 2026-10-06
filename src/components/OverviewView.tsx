@@ -1,8 +1,15 @@
 import { useMemo } from 'react';
-import { MoonIcon, SunIcon } from './Icons';
+import { BottleIcon, MoonIcon, SunIcon } from './Icons';
 import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
-import { dayKey, dayLabel, formatClock, formatDuration, formatStopwatch } from '../lib/time';
+import { eventTitle } from '../lib/events';
+import {
+  feedAverages,
+  feedsForDay,
+  summarizeFeedDays,
+  totalBottleMl,
+} from '../lib/feedStats';
+import { dayKey, dayLabel, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
 import {
   buildWakeWindows,
   isLongGap,
@@ -66,14 +73,29 @@ function WindowRow({
   );
 }
 
+function sleepOverlapMs(
+  startedAt: string,
+  endedAt: string | null,
+  dayStart: number,
+  dayEnd: number,
+  now: number,
+): number {
+  const start = Math.max(new Date(startedAt).getTime(), dayStart);
+  const end = Math.min(endedAt ? new Date(endedAt).getTime() : now, dayEnd);
+  return Math.max(0, end - start);
+}
+
 export function OverviewView() {
   const { household, events, activeSleep } = useStore();
   const now = useNow(1000);
 
+  const todayKey = dayKey(new Date(now).toISOString());
+  const dayStart = startOfDay(new Date(now)).getTime();
+  const dayEnd = dayStart + 86_400_000;
+
   const windows = useMemo(() => buildWakeWindows(events, now), [events, now]);
   const averages = useMemo(() => periodAverages(windows, LOOKBACK_DAYS, now), [windows, now]);
   const slots = useMemo(() => slotAverages(windows, LOOKBACK_DAYS, now), [windows, now]);
-  const todayKey = dayKey(new Date(now).toISOString());
   const todayWindows = useMemo(() => windowsForDay(windows, todayKey), [windows, todayKey]);
   const pastDays = useMemo(
     () => summarizeDays(windows).filter((day) => day.day !== todayKey).slice(0, LOOKBACK_DAYS),
@@ -86,65 +108,178 @@ export function OverviewView() {
     return map;
   }, [slots]);
 
+  const todayFeeds = useMemo(() => feedsForDay(events, todayKey), [events, todayKey]);
+  const todayBottleMl = useMemo(() => totalBottleMl(todayFeeds), [todayFeeds]);
+  const todayDiapers = useMemo(
+    () => events.filter((event) => event.type === 'diaper' && dayKey(event.startedAt) === todayKey),
+    [events, todayKey],
+  );
+  const sleepToday = useMemo(
+    () =>
+      events
+        .filter((event) => event.type === 'sleep')
+        .reduce(
+          (total, event) =>
+            total + sleepOverlapMs(event.startedAt, event.endedAt, dayStart, dayEnd, now),
+          0,
+        ),
+    [events, dayStart, dayEnd, now],
+  );
+
+  const feedsAvg = useMemo(() => feedAverages(events, LOOKBACK_DAYS, now), [events, now]);
+  const pastFeedDays = useMemo(
+    () => summarizeFeedDays(events).filter((day) => day.day !== todayKey).slice(0, LOOKBACK_DAYS),
+    [events, todayKey],
+  );
+
+  const lastFeed = todayFeeds[todayFeeds.length - 1] ?? null;
   const currentlyAwake = !activeSleep && todayWindows.some((window) => window.open);
 
   return (
     <div className="view">
       <header className="greeting">
-        <p>Wake windows for {household.babyName}</p>
+        <p>Day so far for {household.babyName}</p>
         <h1>Overview</h1>
       </header>
 
-      <section className="summary" aria-label="Averages over the past week">
+      {/* Same today totals as the Home screen: feeds / sleep / diapers */}
+      <section className="summary" aria-label="Today so far">
         <div className="summary-item">
-          <strong>
-            {averages.morningMs !== null ? formatDuration(averages.morningMs) : '—'}
-          </strong>
-          <span>morning avg</span>
+          <strong>{todayFeeds.length}</strong>
+          <span>feeds</span>
         </div>
         <div className="summary-item">
-          <strong>
-            {averages.afternoonMs !== null ? formatDuration(averages.afternoonMs) : '—'}
-          </strong>
-          <span>after noon avg</span>
+          <strong>{sleepToday > 0 ? formatDuration(sleepToday) : '—'}</strong>
+          <span>sleep</span>
         </div>
         <div className="summary-item">
-          <strong>
-            {averages.overallMs !== null ? formatDuration(averages.overallMs) : '—'}
-          </strong>
-          <span>overall avg</span>
+          <strong>{todayDiapers.length}</strong>
+          <span>diapers</span>
         </div>
       </section>
 
-      <p className="overview-hint">
-        Based on {averages.overallCount} wake
-        {averages.overallCount === 1 ? '' : 's'} over the last {LOOKBACK_DAYS} days. Morning =
-        woke before 12:00, after noon = woke from 12:00 on.
-      </p>
+      <section className="panel">
+        <div className="panel-head">
+          <h2 className="panel-title">
+            <BottleIcon width={16} height={16} className="panel-title-icon" />
+            Bottle &amp; feeds
+          </h2>
+          {lastFeed ? (
+            <span className="panel-meta">Last {formatAgo(lastFeed.startedAt, now)}</span>
+          ) : null}
+        </div>
 
-      {slots.length > 0 ? (
-        <section className="panel">
-          <h2 className="panel-title">Usual wake length by turn</h2>
-          <p className="panel-copy">
-            How long she usually stays awake for the 1st, 2nd, 3rd… stretch of the day.
-          </p>
-          <ul className="slot-list">
-            {slots.map((slot) => (
-              <li key={slot.slot} className="slot-row">
-                <span>{slotLabel(slot.slot)}</span>
-                <strong>{formatDuration(slot.averageMs)}</strong>
-                <em>
-                  {slot.count} day{slot.count === 1 ? '' : 's'}
-                </em>
+        <section className="summary summary--inset" aria-label="Feed averages">
+          <div className="summary-item">
+            <strong>{todayBottleMl > 0 ? `${todayBottleMl} ml` : '—'}</strong>
+            <span>bottle today</span>
+          </div>
+          <div className="summary-item">
+            <strong>
+              {feedsAvg.gapMs !== null ? formatDuration(feedsAvg.gapMs) : '—'}
+            </strong>
+            <span>avg between feeds</span>
+          </div>
+          <div className="summary-item">
+            <strong>
+              {feedsAvg.feedsPerDay !== null ? feedsAvg.feedsPerDay.toFixed(1) : '—'}
+            </strong>
+            <span>feeds / day</span>
+          </div>
+        </section>
+
+        <p className="overview-hint">
+          {feedsAvg.bottleMlPerFeed !== null
+            ? `Usual bottle ${Math.round(feedsAvg.bottleMlPerFeed)} ml`
+            : 'Log bottle amounts to see the usual size'}
+          {feedsAvg.morningGapMs !== null
+            ? ` · morning gap ${formatDuration(feedsAvg.morningGapMs)}`
+            : ''}
+          {feedsAvg.afternoonGapMs !== null
+            ? ` · after noon ${formatDuration(feedsAvg.afternoonGapMs)}`
+            : ''}
+          .
+        </p>
+
+        {todayFeeds.length === 0 ? (
+          <p className="empty">No feeds logged today yet.</p>
+        ) : (
+          <ul className="feed-list">
+            {[...todayFeeds].reverse().map((feed) => (
+              <li key={feed.id} className="feed-row">
+                <span className="feed-time">{formatClock(feed.startedAt)}</span>
+                <span className="feed-title">{eventTitle(feed)}</span>
               </li>
             ))}
           </ul>
+        )}
+
+        {pastFeedDays.length > 0 ? (
+          <div className="past-feeds">
+            {pastFeedDays.map((day) => (
+              <div key={day.day} className="past-feed-day">
+                <div className="panel-head">
+                  <h3 className="past-day-title">{dayLabel(day.day)}</h3>
+                  <span className="panel-meta">
+                    {day.count} feed{day.count === 1 ? '' : 's'}
+                    {day.bottleMl > 0 ? ` · ${day.bottleMl} ml` : ''}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
+
+      <section className="panel">
+        <h2 className="panel-title">Wake windows</h2>
+        <section className="summary summary--inset" aria-label="Wake averages">
+          <div className="summary-item">
+            <strong>
+              {averages.morningMs !== null ? formatDuration(averages.morningMs) : '—'}
+            </strong>
+            <span>morning avg</span>
+          </div>
+          <div className="summary-item">
+            <strong>
+              {averages.afternoonMs !== null ? formatDuration(averages.afternoonMs) : '—'}
+            </strong>
+            <span>after noon avg</span>
+          </div>
+          <div className="summary-item">
+            <strong>
+              {averages.overallMs !== null ? formatDuration(averages.overallMs) : '—'}
+            </strong>
+            <span>overall avg</span>
+          </div>
         </section>
-      ) : null}
+        <p className="overview-hint">
+          Based on {averages.overallCount} wake
+          {averages.overallCount === 1 ? '' : 's'} over the last {LOOKBACK_DAYS} days. Morning =
+          woke before 12:00, after noon = woke from 12:00 on.
+        </p>
+
+        {slots.length > 0 ? (
+          <>
+            <h3 className="subpanel-title">Usual wake length by turn</h3>
+            <ul className="slot-list">
+              {slots.map((slot) => (
+                <li key={slot.slot} className="slot-row">
+                  <span>{slotLabel(slot.slot)}</span>
+                  <strong>{formatDuration(slot.averageMs)}</strong>
+                  <em>
+                    {slot.count} day{slot.count === 1 ? '' : 's'}
+                  </em>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </section>
 
       <section className="panel">
         <div className="panel-head">
-          <h2 className="panel-title">Today</h2>
+          <h2 className="panel-title">Today's wakes</h2>
           {currentlyAwake ? (
             <span className="sync-pill sync-pill--synced">Awake now</span>
           ) : activeSleep ? (
@@ -172,7 +307,7 @@ export function OverviewView() {
 
       {pastDays.length > 0 ? (
         <section className="panel">
-          <h2 className="panel-title">Past days</h2>
+          <h2 className="panel-title">Past wake days</h2>
           <div className="past-days">
             {pastDays.map((day) => (
               <div key={day.day} className="past-day">
