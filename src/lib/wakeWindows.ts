@@ -232,3 +232,42 @@ export function slotLabel(slot: number): string {
   if (slot === 3) return '3rd wake';
   return `${slot}th wake`;
 }
+
+/**
+ * Estimate how long this wake should last from past same-slot averages, and
+ * when the next sleep is likely if she woke at `startedAt`.
+ */
+export function estimateWake(
+  slot: number,
+  startedAt: string,
+  slotAverageMap: Map<number, number>,
+  overallAverageMs: number | null,
+  now: number = Date.now(),
+): {
+  estimatedMs: number;
+  nextSleepAt: string;
+  remainingMs: number;
+  overdue: boolean;
+} | null {
+  const estimatedMs = slotAverageMap.get(slot) ?? overallAverageMs;
+  if (estimatedMs === null || estimatedMs <= 0) return null;
+
+  const start = new Date(startedAt).getTime();
+  const nextSleepAt = new Date(start + estimatedMs).toISOString();
+  const remainingMs = start + estimatedMs - now;
+
+  return {
+    estimatedMs,
+    nextSleepAt,
+    remainingMs,
+    overdue: remainingMs <= 0,
+  };
+}
+
+/** Next slot number if she woke right now (after today's completed wakes). */
+export function nextWakeSlot(todayWindows: WakeWindow[]): number {
+  const closed = todayWindows.filter((window) => !window.open);
+  const open = todayWindows.find((window) => window.open);
+  if (open) return open.slot;
+  return closed.length + 1;
+}

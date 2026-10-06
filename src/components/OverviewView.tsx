@@ -12,6 +12,7 @@ import {
 import { dayKey, dayLabel, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
 import {
   buildWakeWindows,
+  estimateWake,
   isLongGap,
   periodAverages,
   slotAverages,
@@ -29,18 +30,30 @@ function compareToAverage(actualMs: number, averageMs: number | null): string | 
   const abs = Math.abs(diff);
   if (abs < 5 * 60_000) return 'about average';
   return diff > 0
-    ? `${formatDuration(abs)} longer than average`
-    : `${formatDuration(abs)} shorter than average`;
+    ? `${formatDuration(abs)} longer than usual`
+    : `${formatDuration(abs)} shorter than usual`;
 }
 
 function WindowRow({
   window,
   averageMs,
+  now,
 }: {
   window: WakeWindow;
   averageMs: number | null;
+  now: number;
 }) {
   const longGap = isLongGap(window);
+  const estimate =
+    averageMs && averageMs > 0
+      ? estimateWake(
+          window.slot,
+          window.startedAt,
+          new Map([[window.slot, averageMs]]),
+          averageMs,
+          now,
+        )
+      : null;
   const compare =
     window.open || longGap ? null : compareToAverage(window.durationMs, averageMs);
 
@@ -64,6 +77,16 @@ function WindowRow({
           Woke {formatClock(window.startedAt)}
           {window.endedAt ? ` → slept ${formatClock(window.endedAt)}` : ' → still awake'}
         </span>
+        {estimate && !longGap ? (
+          <span className="wake-estimate">
+            Usually ~{formatDuration(estimate.estimatedMs)} for this wake
+            {window.open
+              ? estimate.overdue
+                ? ` · past usual (next sleep was ~${formatClock(estimate.nextSleepAt)})`
+                : ` · next sleep ~${formatClock(estimate.nextSleepAt)} · ${formatDuration(estimate.remainingMs)} left`
+              : null}
+          </span>
+        ) : null}
         {longGap ? (
           <span className="wake-compare">Long gap — a sleep may be missing</span>
         ) : null}
@@ -134,6 +157,16 @@ export function OverviewView() {
 
   const lastFeed = todayFeeds[todayFeeds.length - 1] ?? null;
   const currentlyAwake = !activeSleep && todayWindows.some((window) => window.open);
+  const openWindow = todayWindows.find((window) => window.open) ?? null;
+  const liveEstimate = openWindow
+    ? estimateWake(
+        openWindow.slot,
+        openWindow.startedAt,
+        slotAverageMap,
+        averages.overallMs,
+        now,
+      )
+    : null;
 
   return (
     <div className="view">
@@ -232,7 +265,37 @@ export function OverviewView() {
       </section>
 
       <section className="panel">
-        <h2 className="panel-title">Wake windows</h2>
+        <h2 className="panel-title">Estimated awake time</h2>
+        <p className="panel-copy">
+          From the last {LOOKBACK_DAYS} days — how long she usually stays awake after the 1st,
+          2nd, 3rd… wake.
+        </p>
+
+        {slots.length === 0 ? (
+          <p className="empty">
+            Need a few sleeps logged on different days — then you'll see estimates for each wake.
+          </p>
+        ) : (
+          <ul className="estimate-list">
+            {slots.map((slot) => (
+              <li
+                key={slot.slot}
+                className={
+                  openWindow?.slot === slot.slot ? 'estimate-row estimate-row--live' : 'estimate-row'
+                }
+              >
+                <div className="estimate-label">
+                  <span>{slotLabel(slot.slot)}</span>
+                  <em>
+                    from {slot.count} day{slot.count === 1 ? '' : 's'}
+                  </em>
+                </div>
+                <strong className="estimate-value">~{formatDuration(slot.averageMs)}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+
         <section className="summary summary--inset" aria-label="Wake averages">
           <div className="summary-item">
             <strong>
@@ -253,29 +316,26 @@ export function OverviewView() {
             <span>overall avg</span>
           </div>
         </section>
-        <p className="overview-hint">
-          Based on {averages.overallCount} wake
-          {averages.overallCount === 1 ? '' : 's'} over the last {LOOKBACK_DAYS} days. Morning =
-          woke before 12:00, after noon = woke from 12:00 on.
-        </p>
-
-        {slots.length > 0 ? (
-          <>
-            <h3 className="subpanel-title">Usual wake length by turn</h3>
-            <ul className="slot-list">
-              {slots.map((slot) => (
-                <li key={slot.slot} className="slot-row">
-                  <span>{slotLabel(slot.slot)}</span>
-                  <strong>{formatDuration(slot.averageMs)}</strong>
-                  <em>
-                    {slot.count} day{slot.count === 1 ? '' : 's'}
-                  </em>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : null}
       </section>
+
+      {openWindow && liveEstimate ? (
+        <section className="estimate-card" aria-live="polite">
+          <p className="estimate-card-label">
+            {slotLabel(openWindow.slot)} · awake now
+          </p>
+          <strong className="estimate-card-timer">
+            {formatStopwatch(openWindow.durationMs)}
+          </strong>
+          <p className="estimate-card-copy">
+            Usually ~{formatDuration(liveEstimate.estimatedMs)} for this wake
+          </p>
+          <p className="estimate-card-next">
+            {liveEstimate.overdue
+              ? `Past usual time — next sleep was around ${formatClock(liveEstimate.nextSleepAt)}`
+              : `Next sleep around ${formatClock(liveEstimate.nextSleepAt)} · ${formatDuration(liveEstimate.remainingMs)} left`}
+          </p>
+        </section>
+      ) : null}
 
       <section className="panel">
         <div className="panel-head">
@@ -299,6 +359,7 @@ export function OverviewView() {
                 key={`${window.startedAt}-${window.slot}`}
                 window={window}
                 averageMs={slotAverageMap.get(window.slot) ?? averages.overallMs}
+                now={now}
               />
             ))}
           </ul>
@@ -324,6 +385,7 @@ export function OverviewView() {
                       key={`${window.startedAt}-${window.slot}`}
                       window={window}
                       averageMs={slotAverageMap.get(window.slot) ?? averages.overallMs}
+                      now={now}
                     />
                   ))}
                 </ul>

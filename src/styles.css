@@ -858,6 +858,98 @@ code {
   padding: 2px 0;
 }
 
+.estimate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.estimate-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.estimate-row--live {
+  border-color: rgba(255, 209, 102, 0.4);
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.14), rgba(255, 209, 102, 0.04));
+}
+
+.estimate-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.estimate-label span {
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.estimate-label em {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--muted);
+}
+
+.estimate-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--wake);
+}
+
+.estimate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px;
+  background: linear-gradient(135deg, rgba(255, 209, 102, 0.22), rgba(255, 179, 92, 0.08));
+  border: 1px solid rgba(255, 209, 102, 0.35);
+  border-radius: var(--radius);
+}
+
+.estimate-card-label {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 550;
+  color: #ffdca8;
+}
+
+.estimate-card-timer {
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.estimate-card-copy,
+.estimate-card-next {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.estimate-card-next {
+  color: var(--muted);
+}
+
+.wake-estimate {
+  font-size: 12px;
+  line-height: 1.35;
+  color: #ffdca8;
+}
+
 .slot-list {
   display: flex;
   flex-direction: column;

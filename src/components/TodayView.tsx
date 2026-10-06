@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { WhenSheet } from './WhenSheet';
 import { EventList } from './EventList';
 import { DiaperFields, FeedFields, NoteFields } from './DetailFields';
@@ -6,7 +6,15 @@ import { BottleIcon, DiaperIcon, MoonIcon, NoteIcon, SunIcon } from './Icons';
 import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
 import { isSameDay, sleepDurationMs } from '../lib/events';
-import { formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
+import { dayKey, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
+import {
+  buildWakeWindows,
+  estimateWake,
+  periodAverages,
+  slotAverages,
+  slotLabel,
+  windowsForDay,
+} from '../lib/wakeWindows';
 import type { BabyEvent, EventDetails } from '../lib/types';
 
 type Action = 'feed' | 'sleep' | 'wake' | 'diaper' | 'note';
@@ -54,6 +62,29 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
   const lastFeed = events.find((event) => event.type === 'feed');
   const lastDiaper = events.find((event) => event.type === 'diaper');
   const lastSleep = events.find((event) => event.type === 'sleep' && event.endedAt !== null);
+
+  const wakeWindows = useMemo(() => buildWakeWindows(events, now), [events, now]);
+  const todayWindows = useMemo(
+    () => windowsForDay(wakeWindows, dayKey(new Date(now).toISOString())),
+    [wakeWindows, now],
+  );
+  const slots = useMemo(() => slotAverages(wakeWindows, 7, now), [wakeWindows, now]);
+  const wakeAvgs = useMemo(() => periodAverages(wakeWindows, 7, now), [wakeWindows, now]);
+  const slotAverageMap = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const slot of slots) map.set(slot.slot, slot.averageMs);
+    return map;
+  }, [slots]);
+  const openWindow = !activeSleep ? (todayWindows.find((window) => window.open) ?? null) : null;
+  const liveEstimate = openWindow
+    ? estimateWake(
+        openWindow.slot,
+        openWindow.startedAt,
+        slotAverageMap,
+        wakeAvgs.overallMs,
+        now,
+      )
+    : null;
 
   function open(next: Action) {
     setDetails({});
@@ -122,6 +153,20 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
             <SunIcon width={22} height={22} />
             Wake up
           </button>
+        </section>
+      ) : openWindow && liveEstimate ? (
+        <section className="estimate-card estimate-card--home" aria-live="polite">
+          <p className="estimate-card-label">
+            {slotLabel(openWindow.slot)} · usually ~{formatDuration(liveEstimate.estimatedMs)}
+          </p>
+          <strong className="estimate-card-timer">
+            {formatStopwatch(openWindow.durationMs)}
+          </strong>
+          <p className="estimate-card-next">
+            {liveEstimate.overdue
+              ? `Past usual — next sleep was ~${formatClock(liveEstimate.nextSleepAt)}`
+              : `Next sleep ~${formatClock(liveEstimate.nextSleepAt)} · ${formatDuration(liveEstimate.remainingMs)} left`}
+          </p>
         </section>
       ) : null}
 
