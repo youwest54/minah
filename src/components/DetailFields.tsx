@@ -1,13 +1,12 @@
 import { DIAPER_LABEL, FEED_METHOD_LABEL } from '../lib/events';
-import type { BreastSide, DiaperKind, EventDetails, FeedMethod } from '../lib/types';
+import type { DiaperKind, EventDetails, FeedMethod } from '../lib/types';
 
 interface FieldProps {
   details: EventDetails;
   onChange: (next: EventDetails) => void;
 }
 
-const FEED_METHODS: FeedMethod[] = ['bottle', 'breast', 'solid'];
-const SIDES: BreastSide[] = ['left', 'right', 'both'];
+const FEED_METHODS: FeedMethod[] = ['bottle', 'solid'];
 const DIAPER_KINDS: DiaperKind[] = ['wet', 'dirty', 'mixed'];
 const COMMON_AMOUNTS = [60, 90, 120, 150, 180];
 
@@ -73,24 +72,6 @@ export function FeedFields({ details, onChange }: FieldProps) {
                     ...details,
                     amountMl: details.amountMl === amount ? undefined : amount,
                   })
-                }
-              />
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {details.method === 'breast' ? (
-        <div className="field">
-          <span className="field-label">Which side?</span>
-          <div className="chip-row">
-            {SIDES.map((side) => (
-              <Chip
-                key={side}
-                label={side === 'both' ? 'Both' : side === 'left' ? 'Left' : 'Right'}
-                active={details.side === side}
-                onClick={() =>
-                  onChange({ ...details, side: details.side === side ? undefined : side })
                 }
               />
             ))}

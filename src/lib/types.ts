@@ -1,13 +1,13 @@
 export type EventType = 'feed' | 'sleep' | 'diaper' | 'note';
 
-export type FeedMethod = 'bottle' | 'breast' | 'solid';
-export type BreastSide = 'left' | 'right' | 'both';
+export type FeedMethod = 'bottle' | 'solid';
 export type DiaperKind = 'wet' | 'dirty' | 'mixed';
 
 export interface EventDetails {
-  method?: FeedMethod;
+  method?: FeedMethod | 'breast';
   amountMl?: number;
-  side?: BreastSide;
+  /** Kept for older breast entries already saved. */
+  side?: 'left' | 'right' | 'both';
   kind?: DiaperKind;
   text?: string;
 }

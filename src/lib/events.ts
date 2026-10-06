@@ -10,14 +10,8 @@ export const TYPE_LABEL: Record<EventType, string> = {
 
 export const FEED_METHOD_LABEL = {
   bottle: 'Bottle',
-  breast: 'Breast',
   solid: 'Solid food',
-} as const;
-
-export const SIDE_LABEL = {
-  left: 'left',
-  right: 'right',
-  both: 'both sides',
+  breast: 'Feed',
 } as const;
 
 export const DIAPER_LABEL = {
@@ -30,10 +24,10 @@ export const DIAPER_LABEL = {
 export function eventTitle(event: BabyEvent): string {
   switch (event.type) {
     case 'feed': {
-      const { method, amountMl, side } = event.details;
+      const { method, amountMl } = event.details;
       if (method === 'bottle') return amountMl ? `Bottle · ${amountMl} ml` : 'Bottle';
-      if (method === 'breast') return side ? `Breast · ${SIDE_LABEL[side]}` : 'Breast';
       if (method === 'solid') return FEED_METHOD_LABEL.solid;
+      if (method === 'breast') return 'Feed';
       return 'Feed';
     }
     case 'sleep':
