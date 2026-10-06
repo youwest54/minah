@@ -35,30 +35,6 @@ export interface FeedAverages {
   feedCount: number;
 }
 
-export interface BottleDayEstimate {
-  /** Usual total bottle ml for a full day (past days only). */
-  estimatedMl: number;
-  /** Usual number of bottle feeds per day. */
-  estimatedBottles: number;
-  /** Usual number of any feeds per day. */
-  estimatedFeeds: number;
-  /** Usual size of one bottle. */
-  usualBottleMl: number | null;
-  /** Usual gap between feeds. */
-  gapMs: number | null;
-  todayMl: number;
-  todayBottles: number;
-  todayFeeds: number;
-  remainingMl: number;
-  progress: number;
-  overTarget: boolean;
-  /** When the next feed is likely, from last feed + usual gap. */
-  nextFeedAt: string | null;
-  nextFeedInMs: number | null;
-  nextFeedOverdue: boolean;
-  daysUsed: number;
-}
-
 function periodOf(iso: string): 'morning' | 'afternoon' {
   return new Date(iso).getHours() < NOON_HOUR ? 'morning' : 'afternoon';
 }
@@ -167,87 +143,46 @@ export function feedAverages(
 }
 
 /**
- * Today's bottle progress vs the usual full day from past days (today excluded
- * so a half-finished day doesn't pull the target down).
+ * Next bottle time from the usual gap between feeds. No daily ml averages —
+ * only when the next feed is likely.
  */
-export function bottleDayEstimate(
+export function bottleFeedTimeEstimate(
   events: BabyEvent[],
   days = 7,
   now: number = Date.now(),
-): BottleDayEstimate | null {
+): {
+  gapMs: number;
+  nextFeedAt: string;
+  nextFeedInMs: number;
+  nextFeedOverdue: boolean;
+  lastFeedAt: string;
+  daysUsed: number;
+} | null {
   const todayKey = dayKey(new Date(now).toISOString());
   const cutoff = startOfDay(new Date(now));
   cutoff.setDate(cutoff.getDate() - (days - 1));
   const cutoffKey = dayKey(cutoff.toISOString());
 
-  const pastFeeds = feedEvents(events).filter((event) => {
-    const key = dayKey(event.startedAt);
-    return key >= cutoffKey && key < todayKey;
-  });
-
-  const byDay = new Map<string, BabyEvent[]>();
-  for (const feed of pastFeeds) {
-    const key = dayKey(feed.startedAt);
-    const bucket = byDay.get(key);
-    if (bucket) bucket.push(feed);
-    else byDay.set(key, [feed]);
-  }
-
-  const bottleByDay = [...byDay.values()]
-    .map((list) => totalBottleMl(list))
-    .filter((ml) => ml > 0);
-  const bottleCounts = [...byDay.values()]
-    .map((list) => list.filter((event) => bottleMl(event) > 0).length)
-    .filter((count) => count > 0);
-  const feedCounts = [...byDay.values()].map((list) => list.length);
-  const bottleAmounts = pastFeeds.map(bottleMl).filter((ml) => ml > 0);
-
-  const estimatedMl = average(bottleByDay);
-  if (estimatedMl === null || estimatedMl <= 0) return null;
-
-  const todayFeeds = feedsForDay(events, todayKey);
-  const todayMl = totalBottleMl(todayFeeds);
-  const todayBottles = todayFeeds.filter((event) => bottleMl(event) > 0).length;
-  const remainingMl = Math.max(0, Math.round(estimatedMl - todayMl));
-  const progress = Math.min(1, todayMl / estimatedMl);
-
-  const gapMs = average(
-    buildFeedGaps(events)
-      .filter((gap) => gap.day >= cutoffKey && gap.day < todayKey)
-      .map((gap) => gap.durationMs),
+  const gaps = buildFeedGaps(events).filter(
+    (gap) => gap.day >= cutoffKey && gap.day <= todayKey,
   );
+  const gapMs = average(gaps.map((gap) => gap.durationMs));
+  if (gapMs === null || gapMs <= 0) return null;
 
-  const lastFeed = [...todayFeeds].sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]
-    ?? feedEvents(events).filter((event) => dayKey(event.startedAt) < todayKey).at(-1)
-    ?? null;
+  const feeds = feedEvents(events);
+  const lastFeed = feeds[feeds.length - 1];
+  if (!lastFeed) return null;
 
-  let nextFeedAt: string | null = null;
-  let nextFeedInMs: number | null = null;
-  let nextFeedOverdue = false;
-  if (lastFeed && gapMs !== null) {
-    const next = new Date(lastFeed.startedAt).getTime() + gapMs;
-    nextFeedAt = new Date(next).toISOString();
-    nextFeedInMs = next - now;
-    nextFeedOverdue = nextFeedInMs <= 0;
-  }
+  const next = new Date(lastFeed.startedAt).getTime() + gapMs;
+  const nextFeedInMs = next - now;
 
   return {
-    estimatedMl: Math.round(estimatedMl),
-    estimatedBottles: Math.round(average(bottleCounts) ?? 0),
-    estimatedFeeds: Math.round((average(feedCounts) ?? 0) * 10) / 10,
-    usualBottleMl:
-      average(bottleAmounts) !== null ? Math.round(average(bottleAmounts) as number) : null,
     gapMs,
-    todayMl,
-    todayBottles,
-    todayFeeds: todayFeeds.length,
-    remainingMl,
-    progress,
-    overTarget: todayMl > estimatedMl,
-    nextFeedAt,
+    nextFeedAt: new Date(next).toISOString(),
     nextFeedInMs,
-    nextFeedOverdue,
-    daysUsed: bottleByDay.length,
+    nextFeedOverdue: nextFeedInMs <= 0,
+    lastFeedAt: lastFeed.startedAt,
+    daysUsed: new Set(gaps.map((gap) => gap.day)).size,
   };
 }
 

@@ -6,13 +6,15 @@ import { BottleIcon, DiaperIcon, MoonIcon, NoteIcon, SunIcon } from './Icons';
 import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
 import { isSameDay, sleepDurationMs } from '../lib/events';
-import { bottleDayEstimate, totalBottleMl, feedsForDay } from '../lib/feedStats';
+import { bottleFeedTimeEstimate } from '../lib/feedStats';
 import { dayKey, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
 import {
   buildWakeWindows,
+  estimateSleep,
   estimateWake,
   periodAverages,
   slotAverages,
+  sleepSlotAverages,
   slotLabel,
   windowsForDay,
 } from '../lib/wakeWindows';
@@ -87,14 +89,27 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
       )
     : null;
 
-  const bottleEstimate = useMemo(
-    () => bottleDayEstimate(events, 7, now),
+  const bottleTime = useMemo(
+    () => bottleFeedTimeEstimate(events, 7, now),
     [events, now],
   );
-  const todayBottleMl = useMemo(() => {
-    const key = dayKey(new Date(now).toISOString());
-    return totalBottleMl(feedsForDay(events, key));
-  }, [events, now]);
+
+  const sleepSlots = useMemo(
+    () => sleepSlotAverages(wakeWindows, 7, now),
+    [wakeWindows, now],
+  );
+  const sleepAverageMap = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const slot of sleepSlots) map.set(slot.slot, slot.averageMs);
+    return map;
+  }, [sleepSlots]);
+  const napWindow = todayWindows.find((window) => window.sleptAfterOpen) ?? null;
+  const liveSleepEstimate =
+    activeSleep && napWindow
+      ? estimateSleep(napWindow.slot + 1, activeSleep.startedAt, sleepAverageMap, now)
+      : activeSleep && todayWindows.length === 0
+        ? estimateSleep(1, activeSleep.startedAt, sleepAverageMap, now)
+        : null;
 
   function open(next: Action) {
     setDetails({});
@@ -154,10 +169,20 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
             <span className="sleeping-label">
               <MoonIcon width={16} height={16} />
               Sleeping since {formatClock(activeSleep.startedAt)}
+              {liveSleepEstimate
+                ? ` · usually ~${formatDuration(liveSleepEstimate.estimatedMs)}`
+                : ''}
             </span>
             <strong className="sleeping-timer">
               {formatStopwatch(sleepDurationMs(activeSleep, now))}
             </strong>
+            {liveSleepEstimate ? (
+              <span className="sleeping-estimate">
+                {liveSleepEstimate.overdue
+                  ? `Past usual — wake was ~${formatClock(liveSleepEstimate.wakeAt)}`
+                  : `Wake ~${formatClock(liveSleepEstimate.wakeAt)} · ${formatDuration(liveSleepEstimate.remainingMs)} left`}
+              </span>
+            ) : null}
           </div>
           <button type="button" className="wake-button" onClick={() => open('wake')}>
             <SunIcon width={22} height={22} />
@@ -174,6 +199,9 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
           </strong>
           <p className="estimate-card-copy">
             Slept {formatDuration(openWindow.sleptBeforeMs)} before this wake
+            {sleepAverageMap.get(openWindow.slot)
+              ? ` · usual sleep ~${formatDuration(sleepAverageMap.get(openWindow.slot)!)}`
+              : ''}
           </p>
           <p className="estimate-card-next">
             {liveEstimate.overdue
@@ -199,8 +227,10 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
           <span className="action-label">Feed</span>
           <span className="action-hint">
             {lastFeed ? formatAgo(lastFeed.startedAt, now) : 'nothing yet'}
-            {bottleEstimate
-              ? ` · ${todayBottleMl}/${bottleEstimate.estimatedMl} ml`
+            {bottleTime
+              ? bottleTime.nextFeedOverdue
+                ? ` · next was ${formatClock(bottleTime.nextFeedAt)}`
+                : ` · next ~${formatClock(bottleTime.nextFeedAt)}`
               : ''}
           </span>
         </button>
@@ -251,46 +281,15 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
         </div>
       </section>
 
-      {bottleEstimate ? (
-        <section className="bottle-estimate bottle-estimate--home" aria-label="Bottle estimate">
-          <div className="bottle-estimate-head">
-            <div>
-              <p className="estimate-card-label">Bottle today</p>
-              <strong className="bottle-estimate-ml">
-                {bottleEstimate.todayMl}
-                <span> / ~{bottleEstimate.estimatedMl} ml</span>
-              </strong>
-            </div>
-            <div className="bottle-estimate-side">
-              <strong>
-                {bottleEstimate.overTarget
-                  ? 'Over'
-                  : `${bottleEstimate.remainingMl} ml`}
-              </strong>
-              <span>{bottleEstimate.overTarget ? 'usual day' : 'left'}</span>
-            </div>
-          </div>
-          <div className="bottle-bar" role="progressbar" aria-valuenow={Math.round(bottleEstimate.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
-            <div
-              className={
-                bottleEstimate.overTarget ? 'bottle-bar-fill bottle-bar-fill--over' : 'bottle-bar-fill'
-              }
-              style={{ width: `${Math.min(100, bottleEstimate.progress * 100)}%` }}
-            />
-          </div>
-          {bottleEstimate.nextFeedAt ? (
-            <p className="estimate-card-next">
-              {bottleEstimate.nextFeedOverdue
-                ? `Next feed was ~${formatClock(bottleEstimate.nextFeedAt)}`
-                : `Next feed ~${formatClock(bottleEstimate.nextFeedAt)} · ${formatDuration(bottleEstimate.nextFeedInMs ?? 0)}`}
-              {bottleEstimate.usualBottleMl ? ` · ~${bottleEstimate.usualBottleMl} ml` : ''}
-            </p>
-          ) : (
-            <p className="estimate-card-next">
-              Usual ~{bottleEstimate.estimatedBottles} bottles / day
-              {bottleEstimate.usualBottleMl ? ` · ~${bottleEstimate.usualBottleMl} ml each` : ''}
-            </p>
-          )}
+      {bottleTime ? (
+        <section className="bottle-estimate bottle-estimate--home" aria-label="Next bottle">
+          <p className="estimate-card-label">Next bottle</p>
+          <strong className="bottle-estimate-ml">{formatClock(bottleTime.nextFeedAt)}</strong>
+          <p className="estimate-card-next">
+            {bottleTime.nextFeedOverdue
+              ? `Past usual · every ${formatDuration(bottleTime.gapMs)}`
+              : `In ${formatDuration(bottleTime.nextFeedInMs)} · every ${formatDuration(bottleTime.gapMs)}`}
+          </p>
         </section>
       ) : null}
 

@@ -4,8 +4,7 @@ import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
 import { eventTitle } from '../lib/events';
 import {
-  bottleDayEstimate,
-  feedAverages,
+  bottleFeedTimeEstimate,
   feedsForDay,
   summarizeFeedDays,
   totalBottleMl,
@@ -13,10 +12,13 @@ import {
 import { dayKey, dayLabel, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
 import {
   buildWakeWindows,
+  estimateSleep,
   estimateWake,
   isLongGap,
   periodAverages,
   slotAverages,
+  sleepSlotAverages,
+  sleepSlotLabel,
   slotLabel,
   summarizeDays,
   windowsForDay,
@@ -128,6 +130,10 @@ export function OverviewView() {
   const windows = useMemo(() => buildWakeWindows(events, now), [events, now]);
   const averages = useMemo(() => periodAverages(windows, LOOKBACK_DAYS, now), [windows, now]);
   const slots = useMemo(() => slotAverages(windows, LOOKBACK_DAYS, now), [windows, now]);
+  const sleepSlots = useMemo(
+    () => sleepSlotAverages(windows, LOOKBACK_DAYS, now),
+    [windows, now],
+  );
   const todayWindows = useMemo(() => windowsForDay(windows, todayKey), [windows, todayKey]);
   const pastDays = useMemo(
     () => summarizeDays(windows).filter((day) => day.day !== todayKey).slice(0, LOOKBACK_DAYS),
@@ -139,6 +145,12 @@ export function OverviewView() {
     for (const slot of slots) map.set(slot.slot, slot.averageMs);
     return map;
   }, [slots]);
+
+  const sleepAverageMap = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const slot of sleepSlots) map.set(slot.slot, slot.averageMs);
+    return map;
+  }, [sleepSlots]);
 
   const todayFeeds = useMemo(() => feedsForDay(events, todayKey), [events, todayKey]);
   const todayBottleMl = useMemo(() => totalBottleMl(todayFeeds), [todayFeeds]);
@@ -158,9 +170,8 @@ export function OverviewView() {
     [events, dayStart, dayEnd, now],
   );
 
-  const feedsAvg = useMemo(() => feedAverages(events, LOOKBACK_DAYS, now), [events, now]);
-  const bottleEstimate = useMemo(
-    () => bottleDayEstimate(events, LOOKBACK_DAYS, now),
+  const bottleTime = useMemo(
+    () => bottleFeedTimeEstimate(events, LOOKBACK_DAYS, now),
     [events, now],
   );
   const pastFeedDays = useMemo(
@@ -180,6 +191,19 @@ export function OverviewView() {
         now,
       )
     : null;
+
+  const napWindow = todayWindows.find((window) => window.sleptAfterOpen) ?? null;
+  const liveSleepEstimate =
+    activeSleep && napWindow
+      ? estimateSleep(napWindow.slot + 1, activeSleep.startedAt, sleepAverageMap, now)
+      : activeSleep && todayWindows.length === 0
+        ? estimateSleep(1, activeSleep.startedAt, sleepAverageMap, now)
+        : null;
+
+  const estimateSlots = useMemo(() => {
+    const keys = new Set([...slots.map((s) => s.slot), ...sleepSlots.map((s) => s.slot)]);
+    return [...keys].sort((a, b) => a - b);
+  }, [slots, sleepSlots]);
 
   return (
     <div className="view">
@@ -208,129 +232,33 @@ export function OverviewView() {
         <div className="panel-head">
           <h2 className="panel-title">
             <BottleIcon width={16} height={16} className="panel-title-icon" />
-            Bottle estimate
+            Bottle feed time
           </h2>
           {lastFeed ? (
             <span className="panel-meta">Last {formatAgo(lastFeed.startedAt, now)}</span>
           ) : null}
         </div>
 
-        {bottleEstimate ? (
-          <>
-            <div className="bottle-estimate">
-              <div className="bottle-estimate-head">
-                <div>
-                  <p className="estimate-card-label">Today vs usual day</p>
-                  <strong className="bottle-estimate-ml">
-                    {bottleEstimate.todayMl}
-                    <span> / ~{bottleEstimate.estimatedMl} ml</span>
-                  </strong>
-                </div>
-                <div className="bottle-estimate-side">
-                  <strong>~{bottleEstimate.estimatedBottles}</strong>
-                  <span>bottles / day</span>
-                </div>
-              </div>
-              <div
-                className="bottle-bar"
-                role="progressbar"
-                aria-valuenow={Math.round(bottleEstimate.progress * 100)}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div
-                  className={
-                    bottleEstimate.overTarget ? 'bottle-bar-fill bottle-bar-fill--over' : 'bottle-bar-fill'
-                  }
-                  style={{ width: `${Math.min(100, bottleEstimate.progress * 100)}%` }}
-                />
-              </div>
-              <p className="estimate-card-next">
-                {bottleEstimate.overTarget
-                  ? `${bottleEstimate.todayMl - bottleEstimate.estimatedMl} ml over usual`
-                  : `${bottleEstimate.remainingMl} ml left toward usual day`}
-                {bottleEstimate.usualBottleMl
-                  ? ` · usual bottle ~${bottleEstimate.usualBottleMl} ml`
-                  : ''}
-                {` · from ${bottleEstimate.daysUsed} day${bottleEstimate.daysUsed === 1 ? '' : 's'}`}
-              </p>
-              {bottleEstimate.nextFeedAt && bottleEstimate.gapMs !== null ? (
-                <p className="estimate-card-next">
-                  {bottleEstimate.nextFeedOverdue
-                    ? `Next feed was around ${formatClock(bottleEstimate.nextFeedAt)}`
-                    : `Next feed ~${formatClock(bottleEstimate.nextFeedAt)} · ${formatDuration(bottleEstimate.nextFeedInMs ?? 0)}`}
-                </p>
-              ) : null}
-            </div>
-
-            <ul className="estimate-list">
-              <li className="estimate-row">
-                <div className="estimate-label">
-                  <span>Usual bottle / day</span>
-                  <em>total milk</em>
-                </div>
-                <strong className="estimate-value estimate-value--feed">
-                  ~{bottleEstimate.estimatedMl} ml
-                </strong>
-              </li>
-              <li className="estimate-row">
-                <div className="estimate-label">
-                  <span>Usual bottles / day</span>
-                  <em>how many feeds</em>
-                </div>
-                <strong className="estimate-value estimate-value--feed">
-                  ~{bottleEstimate.estimatedBottles}
-                </strong>
-              </li>
-              {feedsAvg.morningBottleMlPerDay !== null ? (
-                <li className="estimate-row">
-                  <div className="estimate-label">
-                    <span>Morning bottle</span>
-                    <em>before 12:00</em>
-                  </div>
-                  <strong className="estimate-value estimate-value--feed">
-                    ~{Math.round(feedsAvg.morningBottleMlPerDay)} ml
-                  </strong>
-                </li>
-              ) : null}
-              {feedsAvg.afternoonBottleMlPerDay !== null ? (
-                <li className="estimate-row">
-                  <div className="estimate-label">
-                    <span>After noon bottle</span>
-                    <em>from 12:00 on</em>
-                  </div>
-                  <strong className="estimate-value estimate-value--feed">
-                    ~{Math.round(feedsAvg.afternoonBottleMlPerDay)} ml
-                  </strong>
-                </li>
-              ) : null}
-            </ul>
-          </>
+        {bottleTime ? (
+          <div className="bottle-estimate">
+            <p className="estimate-card-label">Estimated next bottle</p>
+            <strong className="bottle-estimate-ml">
+              {bottleTime.nextFeedOverdue
+                ? formatClock(bottleTime.nextFeedAt)
+                : formatClock(bottleTime.nextFeedAt)}
+            </strong>
+            <p className="estimate-card-next">
+              {bottleTime.nextFeedOverdue
+                ? `Past usual time · usually every ${formatDuration(bottleTime.gapMs)}`
+                : `In ${formatDuration(bottleTime.nextFeedInMs)} · usually every ${formatDuration(bottleTime.gapMs)}`}
+              {` · from ${bottleTime.daysUsed} day${bottleTime.daysUsed === 1 ? '' : 's'}`}
+            </p>
+          </div>
         ) : (
           <p className="empty">
-            Log bottle amounts for a couple of days — then you'll see the usual ml per day and
-            today's progress.
+            Log a few bottle feeds — then you'll see when the next one is usually due.
           </p>
         )}
-
-        <section className="summary summary--inset" aria-label="Feed averages">
-          <div className="summary-item">
-            <strong>{todayBottleMl > 0 ? `${todayBottleMl} ml` : '—'}</strong>
-            <span>bottle today</span>
-          </div>
-          <div className="summary-item">
-            <strong>
-              {feedsAvg.gapMs !== null ? formatDuration(feedsAvg.gapMs) : '—'}
-            </strong>
-            <span>avg between feeds</span>
-          </div>
-          <div className="summary-item">
-            <strong>
-              {feedsAvg.feedsPerDay !== null ? feedsAvg.feedsPerDay.toFixed(1) : '—'}
-            </strong>
-            <span>feeds / day</span>
-          </div>
-        </section>
 
         {todayFeeds.length === 0 ? (
           <p className="empty">No feeds logged today yet.</p>
@@ -345,6 +273,10 @@ export function OverviewView() {
           </ul>
         )}
 
+        {todayBottleMl > 0 ? (
+          <p className="overview-hint">Bottle today: {todayBottleMl} ml</p>
+        ) : null}
+
         {pastFeedDays.length > 0 ? (
           <div className="past-feeds">
             {pastFeedDays.map((day) => (
@@ -354,11 +286,6 @@ export function OverviewView() {
                   <span className="panel-meta">
                     {day.count} feed{day.count === 1 ? '' : 's'}
                     {day.bottleMl > 0 ? ` · ${day.bottleMl} ml` : ''}
-                    {bottleEstimate
-                      ? day.bottleMl > 0
-                        ? ` · usual ~${bottleEstimate.estimatedMl} ml`
-                        : ''
-                      : ''}
                   </span>
                 </div>
               </div>
@@ -368,57 +295,58 @@ export function OverviewView() {
       </section>
 
       <section className="panel">
-        <h2 className="panel-title">Estimated awake time</h2>
+        <h2 className="panel-title">Estimated wake &amp; sleep</h2>
         <p className="panel-copy">
-          From the last {LOOKBACK_DAYS} days — how long she usually stays awake after the 1st,
-          2nd, 3rd… wake.
+          From the last {LOOKBACK_DAYS} days — how long she usually stays awake, and how long she
+          usually sleeps, for the 1st, 2nd, 3rd… turn.
         </p>
 
-        {slots.length === 0 ? (
+        {estimateSlots.length === 0 ? (
           <p className="empty">
-            Need a few sleeps logged on different days — then you'll see estimates for each wake.
+            Need a few sleeps logged on different days — then you'll see wake and sleep estimates.
           </p>
         ) : (
           <ul className="estimate-list">
-            {slots.map((slot) => (
-              <li
-                key={slot.slot}
-                className={
-                  openWindow?.slot === slot.slot ? 'estimate-row estimate-row--live' : 'estimate-row'
-                }
-              >
-                <div className="estimate-label">
-                  <span>{slotLabel(slot.slot)}</span>
-                  <em>
-                    from {slot.count} day{slot.count === 1 ? '' : 's'}
-                  </em>
-                </div>
-                <strong className="estimate-value">~{formatDuration(slot.averageMs)}</strong>
-              </li>
-            ))}
+            {estimateSlots.map((slot) => {
+              const wake = slots.find((entry) => entry.slot === slot);
+              const sleep = sleepSlots.find((entry) => entry.slot === slot);
+              const live =
+                openWindow?.slot === slot ||
+                (napWindow !== null && napWindow.slot + 1 === slot && Boolean(activeSleep));
+              return (
+                <li
+                  key={slot}
+                  className={live ? 'estimate-row estimate-row--live' : 'estimate-row'}
+                >
+                  <div className="estimate-label">
+                    <span>Turn {slot}</span>
+                    <em>
+                      {wake ? slotLabel(slot) : ''}
+                      {wake && sleep ? ' · ' : ''}
+                      {sleep ? sleepSlotLabel(slot) : ''}
+                    </em>
+                  </div>
+                  <div className="estimate-pair">
+                    {wake ? (
+                      <strong className="estimate-value">~{formatDuration(wake.averageMs)}</strong>
+                    ) : (
+                      <strong className="estimate-value estimate-value--muted">—</strong>
+                    )}
+                    <span className="estimate-pair-label">awake</span>
+                    {sleep ? (
+                      <strong className="estimate-value estimate-value--sleep">
+                        ~{formatDuration(sleep.averageMs)}
+                      </strong>
+                    ) : (
+                      <strong className="estimate-value estimate-value--muted">—</strong>
+                    )}
+                    <span className="estimate-pair-label">sleep</span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
-
-        <section className="summary summary--inset" aria-label="Wake averages">
-          <div className="summary-item">
-            <strong>
-              {averages.morningMs !== null ? formatDuration(averages.morningMs) : '—'}
-            </strong>
-            <span>morning avg</span>
-          </div>
-          <div className="summary-item">
-            <strong>
-              {averages.afternoonMs !== null ? formatDuration(averages.afternoonMs) : '—'}
-            </strong>
-            <span>after noon avg</span>
-          </div>
-          <div className="summary-item">
-            <strong>
-              {averages.overallMs !== null ? formatDuration(averages.overallMs) : '—'}
-            </strong>
-            <span>overall avg</span>
-          </div>
-        </section>
       </section>
 
       {openWindow && liveEstimate ? (
@@ -430,8 +358,12 @@ export function OverviewView() {
             {formatStopwatch(openWindow.durationMs)}
           </strong>
           <p className="estimate-card-copy">
-            Slept {formatDuration(openWindow.sleptBeforeMs)} before · usually ~
-            {formatDuration(liveEstimate.estimatedMs)} awake
+            Slept {formatDuration(openWindow.sleptBeforeMs)} before
+            {sleepAverageMap.get(openWindow.slot)
+              ? ` (usual sleep ~${formatDuration(sleepAverageMap.get(openWindow.slot)!)})`
+              : ''}
+            {' · '}
+            usually ~{formatDuration(liveEstimate.estimatedMs)} awake
           </p>
           <p className="estimate-card-next">
             {liveEstimate.overdue
@@ -447,6 +379,28 @@ export function OverviewView() {
           </strong>
           <p className="estimate-card-copy">
             Slept {formatDuration(openWindow.sleptBeforeMs)} before this wake
+          </p>
+        </section>
+      ) : null}
+
+      {activeSleep && liveSleepEstimate ? (
+        <section className="estimate-card estimate-card--sleep" aria-live="polite">
+          <p className="estimate-card-label">
+            {sleepSlotLabel(
+              napWindow ? napWindow.slot + 1 : 1,
+            )}{' '}
+            · sleeping now
+          </p>
+          <strong className="estimate-card-timer">
+            {formatStopwatch(now - new Date(activeSleep.startedAt).getTime())}
+          </strong>
+          <p className="estimate-card-copy">
+            Usually sleeps ~{formatDuration(liveSleepEstimate.estimatedMs)}
+          </p>
+          <p className="estimate-card-next">
+            {liveSleepEstimate.overdue
+              ? `Past usual — wake was around ${formatClock(liveSleepEstimate.wakeAt)}`
+              : `Wake around ${formatClock(liveSleepEstimate.wakeAt)} · ${formatDuration(liveSleepEstimate.remainingMs)} left`}
           </p>
         </section>
       ) : null}

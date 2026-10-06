@@ -60,6 +60,12 @@ export interface SlotAverage {
   count: number;
 }
 
+export interface SleepSlotAverage {
+  slot: number;
+  averageMs: number;
+  count: number;
+}
+
 export interface DayWakeSummary {
   day: string;
   windows: WakeWindow[];
@@ -239,6 +245,46 @@ export function slotAverages(
     }));
 }
 
+/**
+ * Average length of the 1st / 2nd / 3rd… sleep of the day (the nap that ended
+ * into each wake), from completed sleeps only.
+ */
+export function sleepSlotAverages(
+  windows: WakeWindow[],
+  days = 7,
+  now: number = Date.now(),
+): SleepSlotAverage[] {
+  const cutoff = startOfDay(new Date(now));
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  const cutoffKey = dayKey(cutoff.toISOString());
+
+  const bySlot = new Map<number, number[]>();
+  for (const window of windows) {
+    if (window.day < cutoffKey) continue;
+    if (window.sleptBeforeMs <= 0 || window.sleptBeforeMs > MAX_AVERAGE_WINDOW_MS * 2) continue;
+    // Overnight sleeps can be longer than a wake window; allow up to 12h.
+    if (window.sleptBeforeMs > 12 * HOUR) continue;
+    const list = bySlot.get(window.slot) ?? [];
+    list.push(window.sleptBeforeMs);
+    bySlot.set(window.slot, list);
+  }
+
+  return [...bySlot.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([slot, values]) => ({
+      slot,
+      averageMs: averageMs(values) ?? 0,
+      count: values.length,
+    }));
+}
+
+export function sleepSlotLabel(slot: number): string {
+  if (slot === 1) return '1st sleep';
+  if (slot === 2) return '2nd sleep';
+  if (slot === 3) return '3rd sleep';
+  return `${slot}th sleep`;
+}
+
 export function windowsForDay(windows: WakeWindow[], day: string): WakeWindow[] {
   return windows
     .filter((window) => window.day === day)
@@ -301,6 +347,33 @@ export function estimateWake(
   return {
     estimatedMs,
     nextSleepAt,
+    remainingMs,
+    overdue: remainingMs <= 0,
+  };
+}
+
+/** Estimate how long the current nap should last from past same-slot sleeps. */
+export function estimateSleep(
+  slot: number,
+  startedAt: string,
+  sleepAverageMap: Map<number, number>,
+  now: number = Date.now(),
+): {
+  estimatedMs: number;
+  wakeAt: string;
+  remainingMs: number;
+  overdue: boolean;
+} | null {
+  const estimatedMs = sleepAverageMap.get(slot);
+  if (estimatedMs === undefined || estimatedMs <= 0) return null;
+
+  const start = new Date(startedAt).getTime();
+  const wakeAt = new Date(start + estimatedMs).toISOString();
+  const remainingMs = start + estimatedMs - now;
+
+  return {
+    estimatedMs,
+    wakeAt,
     remainingMs,
     overdue: remainingMs <= 0,
   };
