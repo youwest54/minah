@@ -4,6 +4,7 @@ import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
 import { eventTitle } from '../lib/events';
 import {
+  bottleDayEstimate,
   feedAverages,
   feedsForDay,
   summarizeFeedDays,
@@ -150,6 +151,10 @@ export function OverviewView() {
   );
 
   const feedsAvg = useMemo(() => feedAverages(events, LOOKBACK_DAYS, now), [events, now]);
+  const bottleEstimate = useMemo(
+    () => bottleDayEstimate(events, LOOKBACK_DAYS, now),
+    [events, now],
+  );
   const pastFeedDays = useMemo(
     () => summarizeFeedDays(events).filter((day) => day.day !== todayKey).slice(0, LOOKBACK_DAYS),
     [events, todayKey],
@@ -195,12 +200,110 @@ export function OverviewView() {
         <div className="panel-head">
           <h2 className="panel-title">
             <BottleIcon width={16} height={16} className="panel-title-icon" />
-            Bottle &amp; feeds
+            Bottle estimate
           </h2>
           {lastFeed ? (
             <span className="panel-meta">Last {formatAgo(lastFeed.startedAt, now)}</span>
           ) : null}
         </div>
+
+        {bottleEstimate ? (
+          <>
+            <div className="bottle-estimate">
+              <div className="bottle-estimate-head">
+                <div>
+                  <p className="estimate-card-label">Today vs usual day</p>
+                  <strong className="bottle-estimate-ml">
+                    {bottleEstimate.todayMl}
+                    <span> / ~{bottleEstimate.estimatedMl} ml</span>
+                  </strong>
+                </div>
+                <div className="bottle-estimate-side">
+                  <strong>~{bottleEstimate.estimatedBottles}</strong>
+                  <span>bottles / day</span>
+                </div>
+              </div>
+              <div
+                className="bottle-bar"
+                role="progressbar"
+                aria-valuenow={Math.round(bottleEstimate.progress * 100)}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={
+                    bottleEstimate.overTarget ? 'bottle-bar-fill bottle-bar-fill--over' : 'bottle-bar-fill'
+                  }
+                  style={{ width: `${Math.min(100, bottleEstimate.progress * 100)}%` }}
+                />
+              </div>
+              <p className="estimate-card-next">
+                {bottleEstimate.overTarget
+                  ? `${bottleEstimate.todayMl - bottleEstimate.estimatedMl} ml over usual`
+                  : `${bottleEstimate.remainingMl} ml left toward usual day`}
+                {bottleEstimate.usualBottleMl
+                  ? ` · usual bottle ~${bottleEstimate.usualBottleMl} ml`
+                  : ''}
+                {` · from ${bottleEstimate.daysUsed} day${bottleEstimate.daysUsed === 1 ? '' : 's'}`}
+              </p>
+              {bottleEstimate.nextFeedAt && bottleEstimate.gapMs !== null ? (
+                <p className="estimate-card-next">
+                  {bottleEstimate.nextFeedOverdue
+                    ? `Next feed was around ${formatClock(bottleEstimate.nextFeedAt)}`
+                    : `Next feed ~${formatClock(bottleEstimate.nextFeedAt)} · ${formatDuration(bottleEstimate.nextFeedInMs ?? 0)}`}
+                </p>
+              ) : null}
+            </div>
+
+            <ul className="estimate-list">
+              <li className="estimate-row">
+                <div className="estimate-label">
+                  <span>Usual bottle / day</span>
+                  <em>total milk</em>
+                </div>
+                <strong className="estimate-value estimate-value--feed">
+                  ~{bottleEstimate.estimatedMl} ml
+                </strong>
+              </li>
+              <li className="estimate-row">
+                <div className="estimate-label">
+                  <span>Usual bottles / day</span>
+                  <em>how many feeds</em>
+                </div>
+                <strong className="estimate-value estimate-value--feed">
+                  ~{bottleEstimate.estimatedBottles}
+                </strong>
+              </li>
+              {feedsAvg.morningBottleMlPerDay !== null ? (
+                <li className="estimate-row">
+                  <div className="estimate-label">
+                    <span>Morning bottle</span>
+                    <em>before 12:00</em>
+                  </div>
+                  <strong className="estimate-value estimate-value--feed">
+                    ~{Math.round(feedsAvg.morningBottleMlPerDay)} ml
+                  </strong>
+                </li>
+              ) : null}
+              {feedsAvg.afternoonBottleMlPerDay !== null ? (
+                <li className="estimate-row">
+                  <div className="estimate-label">
+                    <span>After noon bottle</span>
+                    <em>from 12:00 on</em>
+                  </div>
+                  <strong className="estimate-value estimate-value--feed">
+                    ~{Math.round(feedsAvg.afternoonBottleMlPerDay)} ml
+                  </strong>
+                </li>
+              ) : null}
+            </ul>
+          </>
+        ) : (
+          <p className="empty">
+            Log bottle amounts for a couple of days — then you'll see the usual ml per day and
+            today's progress.
+          </p>
+        )}
 
         <section className="summary summary--inset" aria-label="Feed averages">
           <div className="summary-item">
@@ -220,19 +323,6 @@ export function OverviewView() {
             <span>feeds / day</span>
           </div>
         </section>
-
-        <p className="overview-hint">
-          {feedsAvg.bottleMlPerFeed !== null
-            ? `Usual bottle ${Math.round(feedsAvg.bottleMlPerFeed)} ml`
-            : 'Log bottle amounts to see the usual size'}
-          {feedsAvg.morningGapMs !== null
-            ? ` · morning gap ${formatDuration(feedsAvg.morningGapMs)}`
-            : ''}
-          {feedsAvg.afternoonGapMs !== null
-            ? ` · after noon ${formatDuration(feedsAvg.afternoonGapMs)}`
-            : ''}
-          .
-        </p>
 
         {todayFeeds.length === 0 ? (
           <p className="empty">No feeds logged today yet.</p>
@@ -256,6 +346,11 @@ export function OverviewView() {
                   <span className="panel-meta">
                     {day.count} feed{day.count === 1 ? '' : 's'}
                     {day.bottleMl > 0 ? ` · ${day.bottleMl} ml` : ''}
+                    {bottleEstimate
+                      ? day.bottleMl > 0
+                        ? ` · usual ~${bottleEstimate.estimatedMl} ml`
+                        : ''
+                      : ''}
                   </span>
                 </div>
               </div>

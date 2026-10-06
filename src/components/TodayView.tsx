@@ -6,6 +6,7 @@ import { BottleIcon, DiaperIcon, MoonIcon, NoteIcon, SunIcon } from './Icons';
 import { useStore } from '../lib/store';
 import { useNow } from '../hooks/useNow';
 import { isSameDay, sleepDurationMs } from '../lib/events';
+import { bottleDayEstimate, totalBottleMl, feedsForDay } from '../lib/feedStats';
 import { dayKey, formatAgo, formatClock, formatDuration, formatStopwatch, startOfDay } from '../lib/time';
 import {
   buildWakeWindows,
@@ -85,6 +86,15 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
         now,
       )
     : null;
+
+  const bottleEstimate = useMemo(
+    () => bottleDayEstimate(events, 7, now),
+    [events, now],
+  );
+  const todayBottleMl = useMemo(() => {
+    const key = dayKey(new Date(now).toISOString());
+    return totalBottleMl(feedsForDay(events, key));
+  }, [events, now]);
 
   function open(next: Action) {
     setDetails({});
@@ -176,6 +186,9 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
           <span className="action-label">Feed</span>
           <span className="action-hint">
             {lastFeed ? formatAgo(lastFeed.startedAt, now) : 'nothing yet'}
+            {bottleEstimate
+              ? ` · ${todayBottleMl}/${bottleEstimate.estimatedMl} ml`
+              : ''}
           </span>
         </button>
 
@@ -224,6 +237,49 @@ export function TodayView({ onEdit }: { onEdit: (event: BabyEvent) => void }) {
           <span>diapers</span>
         </div>
       </section>
+
+      {bottleEstimate ? (
+        <section className="bottle-estimate bottle-estimate--home" aria-label="Bottle estimate">
+          <div className="bottle-estimate-head">
+            <div>
+              <p className="estimate-card-label">Bottle today</p>
+              <strong className="bottle-estimate-ml">
+                {bottleEstimate.todayMl}
+                <span> / ~{bottleEstimate.estimatedMl} ml</span>
+              </strong>
+            </div>
+            <div className="bottle-estimate-side">
+              <strong>
+                {bottleEstimate.overTarget
+                  ? 'Over'
+                  : `${bottleEstimate.remainingMl} ml`}
+              </strong>
+              <span>{bottleEstimate.overTarget ? 'usual day' : 'left'}</span>
+            </div>
+          </div>
+          <div className="bottle-bar" role="progressbar" aria-valuenow={Math.round(bottleEstimate.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div
+              className={
+                bottleEstimate.overTarget ? 'bottle-bar-fill bottle-bar-fill--over' : 'bottle-bar-fill'
+              }
+              style={{ width: `${Math.min(100, bottleEstimate.progress * 100)}%` }}
+            />
+          </div>
+          {bottleEstimate.nextFeedAt ? (
+            <p className="estimate-card-next">
+              {bottleEstimate.nextFeedOverdue
+                ? `Next feed was ~${formatClock(bottleEstimate.nextFeedAt)}`
+                : `Next feed ~${formatClock(bottleEstimate.nextFeedAt)} · ${formatDuration(bottleEstimate.nextFeedInMs ?? 0)}`}
+              {bottleEstimate.usualBottleMl ? ` · ~${bottleEstimate.usualBottleMl} ml` : ''}
+            </p>
+          ) : (
+            <p className="estimate-card-next">
+              Usual ~{bottleEstimate.estimatedBottles} bottles / day
+              {bottleEstimate.usualBottleMl ? ` · ~${bottleEstimate.usualBottleMl} ml each` : ''}
+            </p>
+          )}
+        </section>
+      ) : null}
 
       <section className="panel">
         <h2 className="panel-title">Today</h2>

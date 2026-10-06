@@ -908,6 +908,84 @@ code {
   color: var(--wake);
 }
 
+.estimate-value--feed {
+  color: var(--feed);
+}
+
+.bottle-estimate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: linear-gradient(135deg, rgba(255, 179, 92, 0.16), rgba(255, 179, 92, 0.04));
+  border: 1px solid rgba(255, 179, 92, 0.28);
+  border-radius: 16px;
+}
+
+.bottle-estimate--home {
+  margin-top: -4px;
+}
+
+.bottle-estimate-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.bottle-estimate-ml {
+  display: block;
+  margin-top: 2px;
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.bottle-estimate-ml span {
+  font-size: 15px;
+  font-weight: 550;
+  color: var(--muted);
+}
+
+.bottle-estimate-side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.bottle-estimate-side strong {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--feed);
+}
+
+.bottle-estimate-side span {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bottle-bar {
+  height: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 99px;
+}
+
+.bottle-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ffb35c, #ffd166);
+  border-radius: 99px;
+  transition: width 0.25s ease;
+}
+
+.bottle-bar-fill--over {
+  background: linear-gradient(90deg, #ffb35c, #ff6b6b);
+}
+
 .estimate-card {
   display: flex;
   flex-direction: column;
